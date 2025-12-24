@@ -1,11 +1,74 @@
 import type { Command, CommandContext, ExecResult } from "../../types.js";
-import { unknownOption } from "../help.js";
+import { hasHelpFlag, showHelp, unknownOption } from "../help.js";
+
+const trHelp = {
+  name: "tr",
+  summary: "translate or delete characters",
+  usage: "tr [OPTION]... SET1 [SET2]",
+  options: [
+    "-d, --delete         delete characters in SET1",
+    "-s, --squeeze-repeats  squeeze repeated characters",
+    "    --help           display this help and exit",
+  ],
+  description: `SET syntax:
+  a-z         character range
+  [:alnum:]   all letters and digits
+  [:alpha:]   all letters
+  [:digit:]   all digits
+  [:lower:]   all lowercase letters
+  [:upper:]   all uppercase letters
+  [:space:]   all whitespace
+  [:blank:]   horizontal whitespace
+  [:punct:]   all punctuation
+  [:print:]   all printable characters
+  [:graph:]   all printable characters except space
+  [:cntrl:]   all control characters
+  [:xdigit:]  all hexadecimal digits
+  \\n, \\t, \\r  escape sequences`,
+};
+
+// POSIX character class definitions
+const POSIX_CLASSES: Record<string, string> = {
+  "[:alnum:]":
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+  "[:alpha:]": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+  "[:blank:]": " \t",
+  "[:cntrl:]": Array.from({ length: 32 }, (_, i) => String.fromCharCode(i))
+    .join("")
+    .concat(String.fromCharCode(127)),
+  "[:digit:]": "0123456789",
+  "[:graph:]": Array.from({ length: 94 }, (_, i) =>
+    String.fromCharCode(33 + i),
+  ).join(""),
+  "[:lower:]": "abcdefghijklmnopqrstuvwxyz",
+  "[:print:]": Array.from({ length: 95 }, (_, i) =>
+    String.fromCharCode(32 + i),
+  ).join(""),
+  "[:punct:]": "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+  "[:space:]": " \t\n\r\f\v",
+  "[:upper:]": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  "[:xdigit:]": "0123456789ABCDEFabcdef",
+};
 
 function expandRange(set: string): string {
   let result = "";
   let i = 0;
 
   while (i < set.length) {
+    // Check for POSIX character classes like [:alnum:]
+    if (set[i] === "[" && set[i + 1] === ":") {
+      let found = false;
+      for (const [className, chars] of Object.entries(POSIX_CLASSES)) {
+        if (set.slice(i).startsWith(className)) {
+          result += chars;
+          i += className.length;
+          found = true;
+          break;
+        }
+      }
+      if (found) continue;
+    }
+
     // Handle escape sequences
     if (set[i] === "\\" && i + 1 < set.length) {
       const next = set[i + 1];
@@ -43,6 +106,10 @@ function expandRange(set: string): string {
 export const trCommand: Command = {
   name: "tr",
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
+    if (hasHelpFlag(args)) {
+      return showHelp(trHelp);
+    }
+
     let deleteMode = false;
     let squeezeMode = false;
     const sets: string[] = [];

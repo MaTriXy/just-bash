@@ -191,3 +191,7 @@ xargs — build argument lists
 - Add awk comparison tests
 - Add awk tests to the agent scenarios
 - add a bash command and common aliases like /bin/sh that can run shell scripts from the command line and from files
+
+## Implementation phase 12
+
+- Lazy load commands via dynamic import

@@ -12,6 +12,9 @@ const findHelp = {
     "-ipath PATTERN   like -path but case insensitive",
     "-type TYPE       file is of type: f (regular file), d (directory)",
     "-empty           file is empty or directory is empty",
+    "-mtime N         file's data was modified N*24 hours ago",
+    "-newer FILE      file was modified more recently than FILE",
+    "-size N[ckMGb]   file uses N units of space (c=bytes, k=KB, M=MB, G=GB, b=512B blocks)",
     "-maxdepth LEVELS descend at most LEVELS directories",
     "-mindepth LEVELS do not apply tests at levels less than LEVELS",
     "-not, !          negate the following expression",
@@ -19,6 +22,9 @@ const findHelp = {
     "-o, -or          logical OR",
     "-exec CMD {} ;   execute CMD on each file ({} is replaced by filename)",
     "-exec CMD {} +   execute CMD with multiple files at once",
+    "-print           print the full file name (default action)",
+    "-print0          print the full file name followed by a null character",
+    "-delete          delete found files/directories",
     "    --help       display this help and exit",
   ],
 };
@@ -54,6 +60,9 @@ type Expression =
   | { type: "path"; pattern: string; ignoreCase?: boolean }
   | { type: "type"; fileType: "f" | "d" }
   | { type: "empty" }
+  | { type: "mtime"; days: number; comparison: "exact" | "more" | "less" }
+  | { type: "newer"; refPath: string }
+  | { type: "size"; value: number; unit: "c" | "k" | "M" | "G" | "b"; comparison: "exact" | "more" | "less" }
   | { type: "not"; expr: Expression }
   | { type: "and"; left: Expression; right: Expression }
   | { type: "or"; left: Expression; right: Expression };
@@ -67,6 +76,9 @@ const PREDICATES_WITH_ARGS = new Set([
   "-type",
   "-maxdepth",
   "-mindepth",
+  "-mtime",
+  "-newer",
+  "-size",
 ]);
 // Known predicates that don't take arguments
 const _PREDICATES_NO_ARGS = new Set([
@@ -79,11 +91,12 @@ const _PREDICATES_NO_ARGS = new Set([
   "-or",
 ]);
 
-// Exec action types
-interface ExecAction {
-  command: string[];
-  batchMode: boolean; // true for -exec ... +, false for -exec ... ;
-}
+// Action types for find
+type FindAction =
+  | { type: "exec"; command: string[]; batchMode: boolean }
+  | { type: "print" }
+  | { type: "print0" }
+  | { type: "delete" };
 
 function parseExpressions(
   args: string[],
@@ -92,7 +105,7 @@ function parseExpressions(
   expr: Expression | null;
   pathIndex: number;
   error?: string;
-  execActions: ExecAction[];
+  actions: FindAction[];
 } {
   // Parse into tokens: expressions, operators, and negations
   type Token =
@@ -100,7 +113,7 @@ function parseExpressions(
     | { type: "op"; op: "and" | "or" }
     | { type: "not" };
   const tokens: Token[] = [];
-  const execActions: ExecAction[] = [];
+  const actions: FindAction[] = [];
   let i = startIndex;
 
   while (i < args.length) {
@@ -129,11 +142,47 @@ function parseExpressions(
           expr: null,
           pathIndex: i,
           error: `find: Unknown argument to -type: ${fileType}\n`,
-          execActions: [],
+          actions: [],
         };
       }
     } else if (arg === "-empty") {
       tokens.push({ type: "expr", expr: { type: "empty" } });
+    } else if (arg === "-mtime" && i + 1 < args.length) {
+      const mtimeArg = args[++i];
+      let comparison: "exact" | "more" | "less" = "exact";
+      let daysStr = mtimeArg;
+      if (mtimeArg.startsWith("+")) {
+        comparison = "more";
+        daysStr = mtimeArg.slice(1);
+      } else if (mtimeArg.startsWith("-")) {
+        comparison = "less";
+        daysStr = mtimeArg.slice(1);
+      }
+      const days = parseInt(daysStr, 10);
+      if (!Number.isNaN(days)) {
+        tokens.push({ type: "expr", expr: { type: "mtime", days, comparison } });
+      }
+    } else if (arg === "-newer" && i + 1 < args.length) {
+      const refPath = args[++i];
+      tokens.push({ type: "expr", expr: { type: "newer", refPath } });
+    } else if (arg === "-size" && i + 1 < args.length) {
+      const sizeArg = args[++i];
+      let comparison: "exact" | "more" | "less" = "exact";
+      let sizeStr = sizeArg;
+      if (sizeArg.startsWith("+")) {
+        comparison = "more";
+        sizeStr = sizeArg.slice(1);
+      } else if (sizeArg.startsWith("-")) {
+        comparison = "less";
+        sizeStr = sizeArg.slice(1);
+      }
+      // Parse size with optional suffix (c=bytes, k=KB, M=MB, G=GB, default=512-byte blocks)
+      const sizeMatch = sizeStr.match(/^(\d+)([ckMGb])?$/);
+      if (sizeMatch) {
+        const value = parseInt(sizeMatch[1], 10);
+        const unit = (sizeMatch[2] || "b") as "c" | "k" | "M" | "G" | "b";
+        tokens.push({ type: "expr", expr: { type: "size", value, unit, comparison } });
+      }
     } else if (arg === "-not" || arg === "!") {
       tokens.push({ type: "not" });
     } else if (arg === "-o" || arg === "-or") {
@@ -156,18 +205,24 @@ function parseExpressions(
           expr: null,
           pathIndex: i,
           error: "find: missing argument to `-exec'\n",
-          execActions: [],
+          actions: [],
         };
       }
       const batchMode = args[i] === "+";
-      execActions.push({ command: commandParts, batchMode });
+      actions.push({ type: "exec", command: commandParts, batchMode });
+    } else if (arg === "-print") {
+      actions.push({ type: "print" });
+    } else if (arg === "-print0") {
+      actions.push({ type: "print0" });
+    } else if (arg === "-delete") {
+      actions.push({ type: "delete" });
     } else if (arg.startsWith("-")) {
       // Unknown predicate
       return {
         expr: null,
         pathIndex: i,
         error: `find: unknown predicate '${arg}'\n`,
-        execActions: [],
+        actions: [],
       };
     } else {
       // This is the path - skip if at start, otherwise stop
@@ -181,7 +236,7 @@ function parseExpressions(
   }
 
   if (tokens.length === 0) {
-    return { expr: null, pathIndex: i, execActions };
+    return { expr: null, pathIndex: i, actions };
   }
 
   // Process NOT operators - they bind to the immediately following expression
@@ -233,7 +288,7 @@ function parseExpressions(
   }
 
   if (andResults.length === 0) {
-    return { expr: null, pathIndex: i, execActions };
+    return { expr: null, pathIndex: i, actions };
   }
 
   // Combine AND results with OR
@@ -242,7 +297,7 @@ function parseExpressions(
     result = { type: "or", left: result, right: andResults[j] };
   }
 
-  return { expr: result, pathIndex: i, execActions };
+  return { expr: result, pathIndex: i, actions };
 }
 
 interface EvalContext {
@@ -251,6 +306,9 @@ interface EvalContext {
   isFile: boolean;
   isDirectory: boolean;
   isEmpty: boolean;
+  mtime: number; // modification time as timestamp
+  size: number; // file size in bytes
+  newerRefTimes: Map<string, number>; // reference file mtimes for -newer
 }
 
 function evaluateExpression(expr: Expression, ctx: EvalContext): boolean {
@@ -265,6 +323,44 @@ function evaluateExpression(expr: Expression, ctx: EvalContext): boolean {
       return false;
     case "empty":
       return ctx.isEmpty;
+    case "mtime": {
+      // mtime is in days, comparison is relative to now
+      const now = Date.now();
+      const fileAgeDays = (now - ctx.mtime) / (1000 * 60 * 60 * 24);
+      if (expr.comparison === "more") {
+        return fileAgeDays > expr.days;
+      } else if (expr.comparison === "less") {
+        return fileAgeDays < expr.days;
+      }
+      return Math.floor(fileAgeDays) === expr.days;
+    }
+    case "newer": {
+      const refMtime = ctx.newerRefTimes.get(expr.refPath);
+      if (refMtime === undefined) return false;
+      return ctx.mtime > refMtime;
+    }
+    case "size": {
+      // Convert size to bytes based on unit
+      let targetBytes = expr.value;
+      switch (expr.unit) {
+        case "c": targetBytes = expr.value; break; // bytes
+        case "k": targetBytes = expr.value * 1024; break; // kilobytes
+        case "M": targetBytes = expr.value * 1024 * 1024; break; // megabytes
+        case "G": targetBytes = expr.value * 1024 * 1024 * 1024; break; // gigabytes
+        case "b": targetBytes = expr.value * 512; break; // 512-byte blocks (default)
+      }
+      if (expr.comparison === "more") {
+        return ctx.size > targetBytes;
+      } else if (expr.comparison === "less") {
+        return ctx.size < targetBytes;
+      }
+      // For exact match with blocks, round up to nearest block
+      if (expr.unit === "b") {
+        const fileBlocks = Math.ceil(ctx.size / 512);
+        return fileBlocks === expr.value;
+      }
+      return ctx.size === targetBytes;
+    }
     case "not":
       return !evaluateExpression(expr.expr, ctx);
     case "and":
@@ -314,7 +410,7 @@ export const findCommand: Command = {
     }
 
     // Parse expressions
-    const { expr, error, execActions } = parseExpressions(args, 0);
+    const { expr, error, actions } = parseExpressions(args, 0);
 
     // Return error for unknown predicates
     if (error) {
@@ -322,7 +418,7 @@ export const findCommand: Command = {
     }
 
     // Determine if we should print results (default) or just execute commands
-    const shouldPrint = execActions.length === 0;
+    const shouldPrint = actions.length === 0;
 
     const basePath = ctx.fs.resolvePath(ctx.cwd, searchPath);
 
@@ -338,6 +434,41 @@ export const findCommand: Command = {
     }
 
     const results: string[] = [];
+
+    // Collect -newer reference file mtimes
+    const newerRefTimes = new Map<string, number>();
+    const collectNewerRefs = (e: Expression | null): void => {
+      if (!e) return;
+      if (e.type === "newer") {
+        // Will be populated below
+      } else if (e.type === "not") {
+        collectNewerRefs(e.expr);
+      } else if (e.type === "and" || e.type === "or") {
+        collectNewerRefs(e.left);
+        collectNewerRefs(e.right);
+      }
+    };
+    collectNewerRefs(expr);
+
+    // Resolve -newer reference files
+    const resolveNewerRefs = async (e: Expression | null): Promise<void> => {
+      if (!e) return;
+      if (e.type === "newer") {
+        const refFullPath = ctx.fs.resolvePath(ctx.cwd, e.refPath);
+        try {
+          const refStat = await ctx.fs.stat(refFullPath);
+          newerRefTimes.set(e.refPath, refStat.mtime?.getTime() ?? Date.now());
+        } catch {
+          // Reference file doesn't exist, -newer will always be false
+        }
+      } else if (e.type === "not") {
+        await resolveNewerRefs(e.expr);
+      } else if (e.type === "and" || e.type === "or") {
+        await resolveNewerRefs(e.left);
+        await resolveNewerRefs(e.right);
+      }
+    };
+    await resolveNewerRefs(expr);
 
     // Recursive function to find files
     async function findRecursive(
@@ -396,6 +527,9 @@ export const findCommand: Command = {
           isFile: stat.isFile,
           isDirectory: stat.isDirectory,
           isEmpty,
+          mtime: stat.mtime?.getTime() ?? Date.now(),
+          size: stat.size ?? 0,
+          newerRefTimes,
         };
         matches = evaluateExpression(expr, evalCtx);
       }
@@ -421,52 +555,78 @@ export const findCommand: Command = {
     let stderr = "";
     let exitCode = 0;
 
-    // Execute -exec actions if any
-    if (execActions.length > 0 && results.length > 0) {
-      if (!ctx.exec) {
-        return {
-          stdout: "",
-          stderr: "find: -exec not supported in this context\n",
-          exitCode: 1,
-        };
-      }
-      for (const action of execActions) {
-        if (action.batchMode) {
-          // -exec ... + : execute command once with all files
-          // Replace {} with all file paths
-          const cmdWithFiles: string[] = [];
-          for (const part of action.command) {
-            if (part === "{}") {
-              cmdWithFiles.push(...results);
+    // Execute actions if any
+    if (actions.length > 0) {
+      for (const action of actions) {
+        switch (action.type) {
+          case "print":
+            stdout += results.length > 0 ? `${results.join("\n")}\n` : "";
+            break;
+
+          case "print0":
+            stdout += results.length > 0 ? `${results.join("\0")}\0` : "";
+            break;
+
+          case "delete":
+            // Delete files in reverse order (depth-first) to handle directories
+            const sortedForDelete = [...results].sort((a, b) => b.length - a.length);
+            for (const file of sortedForDelete) {
+              const fullPath = ctx.fs.resolvePath(ctx.cwd, file);
+              try {
+                await ctx.fs.rm(fullPath, { recursive: false });
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                stderr += `find: cannot delete '${file}': ${msg}\n`;
+                exitCode = 1;
+              }
+            }
+            break;
+
+          case "exec":
+            if (!ctx.exec) {
+              return {
+                stdout: "",
+                stderr: "find: -exec not supported in this context\n",
+                exitCode: 1,
+              };
+            }
+            if (action.batchMode) {
+              // -exec ... + : execute command once with all files
+              const cmdWithFiles: string[] = [];
+              for (const part of action.command) {
+                if (part === "{}") {
+                  cmdWithFiles.push(...results);
+                } else {
+                  cmdWithFiles.push(part);
+                }
+              }
+              const cmd = cmdWithFiles.map((p) => `"${p}"`).join(" ");
+              const result = await ctx.exec(cmd);
+              stdout += result.stdout;
+              stderr += result.stderr;
+              if (result.exitCode !== 0) {
+                exitCode = result.exitCode;
+              }
             } else {
-              cmdWithFiles.push(part);
+              // -exec ... ; : execute command for each file
+              for (const file of results) {
+                const cmdWithFile = action.command.map((part) =>
+                  part === "{}" ? file : part,
+                );
+                const cmd = cmdWithFile.map((p) => `"${p}"`).join(" ");
+                const result = await ctx.exec(cmd);
+                stdout += result.stdout;
+                stderr += result.stderr;
+                if (result.exitCode !== 0) {
+                  exitCode = result.exitCode;
+                }
+              }
             }
-          }
-          const cmd = cmdWithFiles.map((p) => `"${p}"`).join(" ");
-          const result = await ctx.exec(cmd);
-          stdout += result.stdout;
-          stderr += result.stderr;
-          if (result.exitCode !== 0) {
-            exitCode = result.exitCode;
-          }
-        } else {
-          // -exec ... ; : execute command for each file
-          for (const file of results) {
-            const cmdWithFile = action.command.map((part) =>
-              part === "{}" ? file : part,
-            );
-            const cmd = cmdWithFile.map((p) => `"${p}"`).join(" ");
-            const result = await ctx.exec(cmd);
-            stdout += result.stdout;
-            stderr += result.stderr;
-            if (result.exitCode !== 0) {
-              exitCode = result.exitCode;
-            }
-          }
+            break;
         }
       }
     } else if (shouldPrint) {
-      // Don't sort - real find uses filesystem traversal order
+      // Default: print with newline separator
       stdout = results.length > 0 ? `${results.join("\n")}\n` : "";
     }
 

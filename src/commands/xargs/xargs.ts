@@ -8,6 +8,7 @@ const xargsHelp = {
   options: [
     "-I REPLACE   replace occurrences of REPLACE with input",
     "-n NUM       use at most NUM arguments per command line",
+    "-P NUM       run at most NUM processes at a time",
     "-0, --null   items are separated by null, not whitespace",
     "-t, --verbose  print commands before executing",
     "-r, --no-run-if-empty  do not run command if input is empty",
@@ -25,6 +26,7 @@ export const xargsCommand: Command = {
 
     let replaceStr: string | null = null;
     let maxArgs: number | null = null;
+    let maxProcs: number | null = null;
     let nullSeparator = false;
     let verbose = false;
     let noRunIfEmpty = false;
@@ -38,6 +40,9 @@ export const xargsCommand: Command = {
         commandStart = i + 1;
       } else if (arg === "-n" && i + 1 < args.length) {
         maxArgs = parseInt(args[++i], 10);
+        commandStart = i + 1;
+      } else if (arg === "-P" && i + 1 < args.length) {
+        maxProcs = parseInt(args[++i], 10);
         commandStart = i + 1;
       } else if (arg === "-0" || arg === "--null") {
         nullSeparator = true;
@@ -54,7 +59,7 @@ export const xargsCommand: Command = {
         // Check for unknown short options
         const _valid = true;
         for (const c of arg.slice(1)) {
-          if (!"0trnI".includes(c)) {
+          if (!"0trnIP".includes(c)) {
             return unknownOption("xargs", `-${c}`);
           }
         }
@@ -111,29 +116,48 @@ export const xargsCommand: Command = {
       return { stdout: `${cmdLine}\n`, stderr: "", exitCode: 0 };
     };
 
+    // Helper to run commands with optional parallelism
+    const runCommands = async (cmdArgsList: string[][]): Promise<void> => {
+      if (maxProcs !== null && maxProcs > 1) {
+        // Run in parallel batches
+        for (let i = 0; i < cmdArgsList.length; i += maxProcs) {
+          const batch = cmdArgsList.slice(i, i + maxProcs);
+          const results = await Promise.all(batch.map(executeCommand));
+          for (const result of results) {
+            stdout += result.stdout;
+            stderr += result.stderr;
+            if (result.exitCode !== 0) {
+              exitCode = result.exitCode;
+            }
+          }
+        }
+      } else {
+        // Sequential execution
+        for (const cmdArgs of cmdArgsList) {
+          const result = await executeCommand(cmdArgs);
+          stdout += result.stdout;
+          stderr += result.stderr;
+          if (result.exitCode !== 0) {
+            exitCode = result.exitCode;
+          }
+        }
+      }
+    };
+
     if (replaceStr !== null) {
       // -I mode: run command once per item, replacing replaceStr in each argument
-      for (const item of items) {
-        const cmdArgs = command.map((c) => c.replaceAll(replaceStr, item));
-        const result = await executeCommand(cmdArgs);
-        stdout += result.stdout;
-        stderr += result.stderr;
-        if (result.exitCode !== 0) {
-          exitCode = result.exitCode;
-        }
-      }
+      const cmdArgsList = items.map((item) =>
+        command.map((c) => c.replaceAll(replaceStr, item)),
+      );
+      await runCommands(cmdArgsList);
     } else if (maxArgs !== null) {
       // -n mode: batch items
+      const cmdArgsList: string[][] = [];
       for (let i = 0; i < items.length; i += maxArgs) {
         const batch = items.slice(i, i + maxArgs);
-        const cmdArgs = [...command, ...batch];
-        const result = await executeCommand(cmdArgs);
-        stdout += result.stdout;
-        stderr += result.stderr;
-        if (result.exitCode !== 0) {
-          exitCode = result.exitCode;
-        }
+        cmdArgsList.push([...command, ...batch]);
       }
+      await runCommands(cmdArgsList);
     } else {
       // Default: all items on one line
       const cmdArgs = [...command, ...items];

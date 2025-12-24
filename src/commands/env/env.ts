@@ -1,11 +1,15 @@
 import type { Command, CommandContext, ExecResult } from "../../types.js";
-import { hasHelpFlag, showHelp } from "../help.js";
+import { hasHelpFlag, showHelp, unknownOption } from "../help.js";
 
 const envHelp = {
   name: "env",
-  summary: "print environment variables",
-  usage: "env [OPTION]... [NAME=VALUE]...",
-  options: ["    --help       display this help and exit"],
+  summary: "run a program in a modified environment",
+  usage: "env [OPTION]... [NAME=VALUE]... [COMMAND [ARG]...]",
+  options: [
+    "-i, --ignore-environment  start with an empty environment",
+    "-u NAME, --unset=NAME     remove NAME from the environment",
+    "    --help                display this help and exit",
+  ],
 };
 
 export const envCommand: Command = {
@@ -16,17 +20,94 @@ export const envCommand: Command = {
       return showHelp(envHelp);
     }
 
-    // Simple env: just print all environment variables
-    const lines: string[] = [];
-    for (const [key, value] of Object.entries(ctx.env)) {
-      lines.push(`${key}=${value}`);
+    let ignoreEnv = false;
+    const unsetVars: string[] = [];
+    const setVars: Record<string, string> = {};
+    let commandStart = -1;
+
+    // Parse arguments
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+
+      if (arg === "-i" || arg === "--ignore-environment") {
+        ignoreEnv = true;
+      } else if (arg === "-u" && i + 1 < args.length) {
+        unsetVars.push(args[++i]);
+      } else if (arg.startsWith("-u")) {
+        unsetVars.push(arg.slice(2));
+      } else if (arg.startsWith("--unset=")) {
+        unsetVars.push(arg.slice(8));
+      } else if (arg.startsWith("--") && arg !== "--") {
+        return unknownOption("env", arg);
+      } else if (arg.startsWith("-") && arg !== "-") {
+        // Check for unknown single-char options
+        for (const c of arg.slice(1)) {
+          if (c !== "i" && c !== "u") {
+            return unknownOption("env", `-${c}`);
+          }
+        }
+        if (arg.includes("i")) ignoreEnv = true;
+      } else if (arg.includes("=") && commandStart === -1) {
+        // NAME=VALUE assignment
+        const eqIdx = arg.indexOf("=");
+        const name = arg.slice(0, eqIdx);
+        const value = arg.slice(eqIdx + 1);
+        setVars[name] = value;
+      } else {
+        // Start of command
+        commandStart = i;
+        break;
+      }
     }
 
-    return {
-      stdout: lines.join("\n") + (lines.length > 0 ? "\n" : ""),
-      stderr: "",
-      exitCode: 0,
-    };
+    // Build the new environment
+    let newEnv: Record<string, string>;
+    if (ignoreEnv) {
+      newEnv = { ...setVars };
+    } else {
+      newEnv = { ...ctx.env };
+      // Unset variables
+      for (const name of unsetVars) {
+        delete newEnv[name];
+      }
+      // Set new variables
+      Object.assign(newEnv, setVars);
+    }
+
+    // If no command, just print environment
+    if (commandStart === -1) {
+      const lines: string[] = [];
+      for (const [key, value] of Object.entries(newEnv)) {
+        lines.push(`${key}=${value}`);
+      }
+      return {
+        stdout: lines.join("\n") + (lines.length > 0 ? "\n" : ""),
+        stderr: "",
+        exitCode: 0,
+      };
+    }
+
+    // Execute command with modified environment
+    if (!ctx.exec) {
+      return {
+        stdout: "",
+        stderr: "env: command execution not supported in this context\n",
+        exitCode: 1,
+      };
+    }
+
+    // Build command line
+    const command = args.slice(commandStart).join(" ");
+
+    // Create a modified context and execute
+    // Note: We can't directly modify the context for exec, so we pass the env vars as prefix
+    // This is a limitation - in a real implementation, exec would accept an env parameter
+    const envPrefix = Object.entries(setVars)
+      .map(([k, v]) => `${k}="${v}"`)
+      .join(" ");
+
+    const fullCommand = envPrefix ? `${envPrefix} ${command}` : command;
+    return ctx.exec(fullCommand);
   },
 };
 

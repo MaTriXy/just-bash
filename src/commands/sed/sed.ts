@@ -111,6 +111,7 @@ export const sedCommand: Command = {
     const scripts: string[] = [];
     let silent = false;
     let inPlace = false;
+    let _extendedRegex = false; // -E/-r flag (accepted but regex is already extended in JS)
     const files: string[] = [];
 
     // Parse arguments
@@ -123,6 +124,8 @@ export const sedCommand: Command = {
       } else if (arg.startsWith("-i")) {
         // Handle -i with optional suffix (we ignore suffix for now)
         inPlace = true;
+      } else if (arg === "-E" || arg === "-r" || arg === "--regexp-extended") {
+        _extendedRegex = true; // JavaScript regex is already extended
       } else if (arg === "-e") {
         if (i + 1 < args.length) {
           scripts.push(args[++i]);
@@ -132,13 +135,14 @@ export const sedCommand: Command = {
       } else if (arg.startsWith("-") && arg.length > 1) {
         // Check for unknown short options
         for (const c of arg.slice(1)) {
-          if (c !== "n" && c !== "e" && c !== "i") {
+          if (c !== "n" && c !== "e" && c !== "i" && c !== "E" && c !== "r") {
             return unknownOption("sed", `-${c}`);
           }
         }
         // Handle combined flags like -ne
         if (arg.includes("n")) silent = true;
         if (arg.includes("i")) inPlace = true;
+        if (arg.includes("E") || arg.includes("r")) _extendedRegex = true;
         // -e in combined form would need next arg for script, handle separately
         if (arg.includes("e") && !arg.includes("n") && !arg.includes("i")) {
           if (i + 1 < args.length) {

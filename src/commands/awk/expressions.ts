@@ -1,0 +1,417 @@
+import type { AwkContext } from "./types.js";
+import {
+  awkLength,
+  awkSubstr,
+  awkIndex,
+  awkSplit,
+  awkSub,
+  awkGsub,
+  awkTolower,
+  awkToupper,
+  awkSprintf,
+} from "./functions.js";
+
+export function evaluateExpression(
+  expr: string,
+  ctx: AwkContext,
+): string | number {
+  expr = expr.trim();
+
+  // String literal
+  if (expr.startsWith('"') && expr.endsWith('"')) {
+    return processEscapesInString(expr.slice(1, -1));
+  }
+
+  // Function calls
+  const funcMatch = expr.match(/^(\w+)\s*\((.*)\)$/);
+  if (funcMatch) {
+    const funcName = funcMatch[1];
+    const argsStr = funcMatch[2];
+    const args = splitFunctionArgs(argsStr);
+
+    switch (funcName) {
+      case "length":
+        return awkLength(args, ctx, evaluateExpression);
+      case "substr":
+        return awkSubstr(args, ctx, evaluateExpression);
+      case "index":
+        return awkIndex(args, ctx, evaluateExpression);
+      case "split":
+        return awkSplit(args, ctx, evaluateExpression);
+      case "sub":
+        return awkSub(args, ctx, evaluateExpression);
+      case "gsub":
+        return awkGsub(args, ctx, evaluateExpression);
+      case "tolower":
+        return awkTolower(args, ctx, evaluateExpression);
+      case "toupper":
+        return awkToupper(args, ctx, evaluateExpression);
+      case "sprintf":
+        return awkSprintf(args, ctx, evaluateExpression);
+      case "int":
+        return Math.floor(Number(evaluateExpression(args[0] || "0", ctx)));
+      case "sqrt":
+        return Math.sqrt(Number(evaluateExpression(args[0] || "0", ctx)));
+      case "sin":
+        return Math.sin(Number(evaluateExpression(args[0] || "0", ctx)));
+      case "cos":
+        return Math.cos(Number(evaluateExpression(args[0] || "0", ctx)));
+      case "log":
+        return Math.log(Number(evaluateExpression(args[0] || "0", ctx)));
+      case "exp":
+        return Math.exp(Number(evaluateExpression(args[0] || "0", ctx)));
+    }
+  }
+
+  // Array access: arr[key]
+  const arrayMatch = expr.match(/^(\w+)\[(.+)\]$/);
+  if (arrayMatch) {
+    const arrayName = arrayMatch[1];
+    const keyExpr = arrayMatch[2];
+    const key = String(evaluateExpression(keyExpr, ctx));
+    if (ctx.arrays[arrayName]) {
+      return ctx.arrays[arrayName][key] ?? "";
+    }
+    return "";
+  }
+
+  // Field reference $n or $(expr)
+  if (expr.startsWith("$")) {
+    if (expr.startsWith("$(")) {
+      // Dynamic field: $(expr)
+      const innerExpr = expr.slice(2, -1);
+      const n = Number(evaluateExpression(innerExpr, ctx));
+      if (n === 0) return ctx.line;
+      return ctx.fields[n - 1] || "";
+    }
+    const fieldMatch = expr.match(/^\$(\d+)$/);
+    if (fieldMatch) {
+      const n = parseInt(fieldMatch[1], 10);
+      if (n === 0) return ctx.line;
+      return ctx.fields[n - 1] || "";
+    }
+  }
+
+  // NR, NF
+  if (expr === "NR") return ctx.NR;
+  if (expr === "NF") return ctx.NF;
+  if (expr === "FS") return ctx.FS;
+  if (expr === "OFS") return ctx.OFS;
+
+  // Variable (defined)
+  if (ctx.vars[expr] !== undefined) {
+    return ctx.vars[expr];
+  }
+
+  // Ternary operator: condition ? true_expr : false_expr
+  const ternaryMatch = expr.match(/^(.+?)\s*\?\s*(.+?)\s*:\s*(.+)$/);
+  if (ternaryMatch) {
+    const condition = evaluateCondition(ternaryMatch[1].trim(), ctx);
+    return condition
+      ? evaluateExpression(ternaryMatch[2].trim(), ctx)
+      : evaluateExpression(ternaryMatch[3].trim(), ctx);
+  }
+
+  // Arithmetic - check BEFORE concatenation
+  const arithMatchSpaced = expr.match(/^(.+?)\s+([+\-*/%])\s+(.+)$/);
+  if (arithMatchSpaced) {
+    const left = Number(evaluateExpression(arithMatchSpaced[1], ctx));
+    const right = Number(evaluateExpression(arithMatchSpaced[3], ctx));
+    switch (arithMatchSpaced[2]) {
+      case "+":
+        return left + right;
+      case "-":
+        return left - right;
+      case "*":
+        return left * right;
+      case "/":
+        return right !== 0 ? left / right : 0;
+      case "%":
+        return left % right;
+    }
+  }
+
+  // Arithmetic without spaces for simple identifiers
+  const arithMatchNoSpace = expr.match(
+    /^([a-zA-Z_]\w*|\$\d+|\d+(?:\.\d+)?)\s*([*/%])\s*([a-zA-Z_]\w*|\$\d+|\d+(?:\.\d+)?)$/,
+  );
+  if (arithMatchNoSpace) {
+    const left = Number(evaluateExpression(arithMatchNoSpace[1], ctx));
+    const right = Number(evaluateExpression(arithMatchNoSpace[3], ctx));
+    switch (arithMatchNoSpace[2]) {
+      case "*":
+        return left * right;
+      case "/":
+        return right !== 0 ? left / right : 0;
+      case "%":
+        return left % right;
+    }
+  }
+
+  // Concatenation
+  if (expr.includes("$") || expr.includes('"')) {
+    return evaluateConcatenation(expr, ctx);
+  }
+
+  // Number
+  if (/^-?\d+(\.\d+)?$/.test(expr)) {
+    return parseFloat(expr);
+  }
+
+  // Uninitialized variable - return empty string
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(expr)) {
+    return "";
+  }
+
+  return expr;
+}
+
+function splitFunctionArgs(argsStr: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let depth = 0;
+  let inString = false;
+
+  for (let i = 0; i < argsStr.length; i++) {
+    const ch = argsStr[i];
+    if (ch === '"' && argsStr[i - 1] !== "\\") {
+      inString = !inString;
+      current += ch;
+    } else if (!inString && ch === "(") {
+      depth++;
+      current += ch;
+    } else if (!inString && ch === ")") {
+      depth--;
+      current += ch;
+    } else if (!inString && ch === "," && depth === 0) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) {
+    result.push(current.trim());
+  }
+  return result;
+}
+
+function processEscapesInString(str: string): string {
+  return str
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\r/g, "\r")
+    .replace(/\\\\/g, "\\");
+}
+
+export function evaluateConcatenation(expr: string, ctx: AwkContext): string {
+  let result = "";
+  let i = 0;
+
+  while (i < expr.length) {
+    // Skip whitespace
+    while (i < expr.length && /\s/.test(expr[i])) i++;
+    if (i >= expr.length) break;
+
+    if (expr[i] === '"') {
+      // String literal
+      let str = "";
+      i++; // skip opening quote
+      while (i < expr.length && expr[i] !== '"') {
+        if (expr[i] === "\\" && i + 1 < expr.length) {
+          const next = expr[i + 1];
+          if (next === "n") str += "\n";
+          else if (next === "t") str += "\t";
+          else if (next === "r") str += "\r";
+          else str += next;
+          i += 2;
+        } else {
+          str += expr[i++];
+        }
+      }
+      i++; // skip closing quote
+      result += str;
+    } else if (expr[i] === "$") {
+      // Field reference
+      i++; // skip $
+      let numStr = "";
+      while (i < expr.length && /\d/.test(expr[i])) {
+        numStr += expr[i++];
+      }
+      const n = parseInt(numStr, 10);
+      result += n === 0 ? ctx.line : ctx.fields[n - 1] || "";
+    } else {
+      // Variable or literal
+      let token = "";
+      while (i < expr.length && !/[\s$"]/.test(expr[i])) {
+        token += expr[i++];
+      }
+      if (token === "NR") result += ctx.NR;
+      else if (token === "NF") result += ctx.NF;
+      else if (ctx.vars[token] !== undefined) result += ctx.vars[token];
+      else result += token;
+    }
+  }
+
+  return result;
+}
+
+export function evaluateCondition(condition: string, ctx: AwkContext): boolean {
+  condition = condition.trim();
+
+  // Handle && (AND) conditions
+  if (condition.includes("&&")) {
+    const parts = splitLogicalOp(condition, "&&");
+    return parts.every((part) => evaluateCondition(part, ctx));
+  }
+
+  // Handle || (OR) conditions
+  if (condition.includes("||")) {
+    const parts = splitLogicalOp(condition, "||");
+    return parts.some((part) => evaluateCondition(part, ctx));
+  }
+
+  // Handle ! (NOT)
+  if (condition.startsWith("!")) {
+    return !evaluateCondition(condition.slice(1).trim(), ctx);
+  }
+
+  // Handle parentheses
+  if (condition.startsWith("(") && condition.endsWith(")")) {
+    return evaluateCondition(condition.slice(1, -1), ctx);
+  }
+
+  // Regex pattern
+  if (condition.startsWith("/") && condition.endsWith("/")) {
+    const regex = new RegExp(condition.slice(1, -1));
+    return regex.test(ctx.line);
+  }
+
+  // "in" operator for arrays: key in array
+  const inMatch = condition.match(/^(.+)\s+in\s+(\w+)$/);
+  if (inMatch) {
+    const key = String(evaluateExpression(inMatch[1].trim(), ctx));
+    const arrayName = inMatch[2];
+    return !!(ctx.arrays[arrayName] && ctx.arrays[arrayName][key] !== undefined);
+  }
+
+  // NR comparisons
+  const nrMatch = condition.match(/^NR\s*(==|!=|>|<|>=|<=)\s*(\d+)$/);
+  if (nrMatch) {
+    const op = nrMatch[1];
+    const val = parseInt(nrMatch[2], 10);
+    return compareValues(ctx.NR, op, val);
+  }
+
+  // $n ~ /pattern/
+  const fieldRegex = condition.match(/^\$(\d+)\s*~\s*\/([^/]+)\/$/);
+  if (fieldRegex) {
+    const fieldNum = parseInt(fieldRegex[1], 10);
+    const pattern = fieldRegex[2];
+    const fieldVal =
+      fieldNum === 0 ? ctx.line : ctx.fields[fieldNum - 1] || "";
+    return new RegExp(pattern).test(fieldVal);
+  }
+
+  // $n !~ /pattern/
+  const fieldNotRegex = condition.match(/^\$(\d+)\s*!~\s*\/([^/]+)\/$/);
+  if (fieldNotRegex) {
+    const fieldNum = parseInt(fieldNotRegex[1], 10);
+    const pattern = fieldNotRegex[2];
+    const fieldVal =
+      fieldNum === 0 ? ctx.line : ctx.fields[fieldNum - 1] || "";
+    return !new RegExp(pattern).test(fieldVal);
+  }
+
+  // Generic comparisons: expr op expr
+  const compMatch = condition.match(/^(.+?)\s*(==|!=|>=|<=|>|<)\s*(.+)$/);
+  if (compMatch) {
+    const leftExpr = compMatch[1].trim();
+    const op = compMatch[2];
+    const rightExpr = compMatch[3].trim();
+
+    const leftVal = evaluateExpression(leftExpr, ctx);
+    const rightVal = evaluateExpression(rightExpr, ctx);
+
+    return compareValues(leftVal, op, rightVal);
+  }
+
+  // Truthy value check
+  const val = evaluateExpression(condition, ctx);
+  if (typeof val === "number") return val !== 0;
+  if (typeof val === "string") return val !== "";
+  return Boolean(val);
+}
+
+function splitLogicalOp(expr: string, op: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+  let inString = false;
+
+  for (let i = 0; i < expr.length; i++) {
+    if (expr[i] === '"' && expr[i - 1] !== "\\") {
+      inString = !inString;
+    }
+    if (!inString) {
+      if (expr[i] === "(") depth++;
+      else if (expr[i] === ")") depth--;
+      else if (depth === 0 && expr.slice(i, i + op.length) === op) {
+        parts.push(current.trim());
+        current = "";
+        i += op.length - 1;
+        continue;
+      }
+    }
+    current += expr[i];
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+export function compareValues(
+  left: number | string,
+  op: string,
+  right: number | string,
+): boolean {
+  const leftNum = typeof left === "number" ? left : parseFloat(String(left));
+  const rightNum =
+    typeof right === "number" ? right : parseFloat(String(right));
+
+  const useNumeric = !Number.isNaN(leftNum) && !Number.isNaN(rightNum);
+
+  if (useNumeric) {
+    switch (op) {
+      case "==":
+        return leftNum === rightNum;
+      case "!=":
+        return leftNum !== rightNum;
+      case ">":
+        return leftNum > rightNum;
+      case "<":
+        return leftNum < rightNum;
+      case ">=":
+        return leftNum >= rightNum;
+      case "<=":
+        return leftNum <= rightNum;
+    }
+  } else {
+    const leftStr = String(left);
+    const rightStr = String(right);
+    switch (op) {
+      case "==":
+        return leftStr === rightStr;
+      case "!=":
+        return leftStr !== rightStr;
+      case ">":
+        return leftStr > rightStr;
+      case "<":
+        return leftStr < rightStr;
+      case ">=":
+        return leftStr >= rightStr;
+      case "<=":
+        return leftStr <= rightStr;
+    }
+  }
+  return false;
+}

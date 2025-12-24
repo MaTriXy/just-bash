@@ -2,6 +2,24 @@ import { minimatch } from "minimatch";
 import type { Command, CommandContext, ExecResult } from "../../types.js";
 import { hasHelpFlag, showHelp, unknownOption } from "../help.js";
 
+// Format date for ls -l output (e.g., "Jan  1 00:00" or "Jan  1  2024")
+function formatDate(date: Date): string {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = months[date.getMonth()];
+  const day = String(date.getDate()).padStart(2, " ");
+  const now = new Date();
+  const sixMonthsAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+
+  // If within last 6 months, show time; otherwise show year
+  if (date > sixMonthsAgo) {
+    const hours = String(date.getHours()).padStart(2, "0");
+    const mins = String(date.getMinutes()).padStart(2, "0");
+    return `${month} ${day} ${hours}:${mins}`;
+  }
+  const year = date.getFullYear();
+  return `${month} ${day}  ${year}`;
+}
+
 const lsHelp = {
   name: "ls",
   summary: "list directory contents",
@@ -169,9 +187,12 @@ async function listGlob(
         const stat = await ctx.fs.stat(fullPath);
         const mode = stat.isDirectory ? "drwxr-xr-x" : "-rw-r--r--";
         const type = stat.isDirectory ? "/" : "";
-        lines.push(`${mode} 1 user user    0 Jan  1 00:00 ${match}${type}`);
+        const size = stat.size ?? 0;
+        const mtime = stat.mtime ?? new Date(0);
+        const dateStr = formatDate(mtime);
+        lines.push(`${mode} 1 user user ${String(size).padStart(5)} ${dateStr} ${match}${type}`);
       } catch {
-        lines.push(`-rw-r--r-- 1 user user    0 Jan  1 00:00 ${match}`);
+        lines.push(`-rw-r--r-- 1 user user     0 Jan  1 00:00 ${match}`);
       }
     }
     return { stdout: `${lines.join("\n")}\n`, stderr: "", exitCode: 0 };
@@ -245,7 +266,7 @@ async function listPath(
       for (const entry of entries) {
         // Handle . and .. specially
         if (entry === "." || entry === "..") {
-          stdout += `drwxr-xr-x 1 user user    0 Jan  1 00:00 ${entry}\n`;
+          stdout += `drwxr-xr-x 1 user user     0 Jan  1 00:00 ${entry}\n`;
           continue;
         }
         const entryPath =
@@ -254,9 +275,12 @@ async function listPath(
           const entryStat = await ctx.fs.stat(entryPath);
           const mode = entryStat.isDirectory ? "drwxr-xr-x" : "-rw-r--r--";
           const suffix = entryStat.isDirectory ? "/" : "";
-          stdout += `${mode} 1 user user    0 Jan  1 00:00 ${entry}${suffix}\n`;
+          const size = entryStat.size ?? 0;
+          const mtime = entryStat.mtime ?? new Date(0);
+          const dateStr = formatDate(mtime);
+          stdout += `${mode} 1 user user ${String(size).padStart(5)} ${dateStr} ${entry}${suffix}\n`;
         } catch {
-          stdout += `-rw-r--r-- 1 user user    0 Jan  1 00:00 ${entry}\n`;
+          stdout += `-rw-r--r-- 1 user user     0 Jan  1 00:00 ${entry}\n`;
         }
       }
     } else {

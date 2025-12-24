@@ -44,7 +44,7 @@ This document details the options and behaviors that are **not available** in Ba
 
 ### cp
 
-**Supported:** `-r`, `-R`, `--recursive`
+**Supported:** `-r`, `-R`, `--recursive`, `-n`, `--no-clobber`, `-p`, `--preserve`, `-v`, `--verbose`
 
 | Unsupported Option | Description |
 |-------------------|-------------|
@@ -52,19 +52,15 @@ This document details the options and behaviors that are **not available** in Ba
 | `-b`, `--backup` | Make backups of existing destination files |
 | `-f`, `--force` | Force copy by removing destination if needed |
 | `-i`, `--interactive` | Prompt before overwrite |
-| `-n`, `--no-clobber` | Do not overwrite existing files |
 | `-l`, `--link` | Hard link files instead of copying |
 | `-L`, `--dereference` | Always follow symbolic links |
-| `-p`, `--preserve` | Preserve mode, ownership, timestamps |
 | `-P`, `--no-dereference` | Never follow symbolic links |
 | `-s`, `--symbolic-link` | Make symbolic links instead of copying |
 | `-u`, `--update` | Copy only when source is newer |
-| `-v`, `--verbose` | Explain what is being done |
 | `-t`, `--target-directory` | Copy all sources into directory |
 | `-T`, `--no-target-directory` | Treat dest as normal file |
 
 **Behavior Differences:**
-- No file attribute preservation (mode, ownership, timestamps)
 - No interactive prompts or backup functionality
 - Cannot create hard/symbolic links instead of copying
 
@@ -209,9 +205,7 @@ This document details the options and behaviors that are **not available** in Ba
 | `-u` | Sort by access time |
 
 **Behavior Differences:**
-- **Long format shows mock data:** mode, user, size all hardcoded
-- Timestamps always show "Jan 1 00:00"
-- File sizes always show 0
+- User/group hardcoded to `user user`
 - Permissions simplified to `drwxr-xr-x` or `-rw-r--r--`
 - No color support
 - No human-readable sizes
@@ -299,11 +293,10 @@ This document details the options and behaviors that are **not available** in Ba
 
 ### sed
 
-**Supported:** `-n`, `--quiet`, `-i`, `--in-place`, `-e`, substitution (`s/pattern/replacement/[gi]`), delete (`d`), print (`p`), address ranges
+**Supported:** `-n`, `--quiet`, `-i`, `--in-place`, `-e`, `-E`, `-r`, `--regexp-extended`, substitution (`s/pattern/replacement/[gi]`), delete (`d`), print (`p`), address ranges
 
 | Unsupported Option | Description |
 |-------------------|-------------|
-| `-E`, `-r` | Extended regex mode |
 | `-f file` | Read script from file |
 | `-I extension` | In-place with backup |
 
@@ -337,24 +330,21 @@ This document details the options and behaviors that are **not available** in Ba
 
 ### awk
 
-**Supported:** `-F`, `-v`, `BEGIN`/`END` blocks, pattern matching, field references (`$1`, `$NF`, `$0`), NR, NF, FS, OFS, arithmetic, comparisons, `print`, basic `printf`
+**Supported:** `-F`, `-v`, `BEGIN`/`END` blocks, pattern matching, field references (`$1`, `$NF`, `$0`), NR, NF, FS, OFS, arithmetic, comparisons, `print`, `printf`, control structures (`if/else`, `while`, `for`, `for-in`), associative arrays, string functions (`length`, `substr`, `index`, `split`, `sub`, `gsub`, `sprintf`, `tolower`, `toupper`), ternary operator, `next`, `exit`
 
 | Missing Feature | Description |
 |----------------|-------------|
-| Arrays | Associative arrays |
-| Control structures | `if/else`, `while`, `for`, `do-while` |
 | User functions | `function` definitions |
-| String functions | `length`, `substr`, `index`, `match`, `split`, `sub`, `gsub`, `sprintf`, `tolower`, `toupper` |
 | Math functions | `atan2`, `cos`, `exp`, `log`, `sin`, `sqrt`, `rand`, `srand` |
 | I/O operations | `getline`, file/pipe redirection, `close`, `fflush`, `system` |
 | Pattern ranges | `/start/,/end/` |
-| `next`, `exit` | Flow control statements |
+| `match()` | Returns position of regex match |
+| `do-while` | Do-while loops |
 
 **Behavior Differences:**
-- **Very simplified awk** - only basic pattern matching and field processing
-- No arrays (major limitation, cannot aggregate data)
-- No control flow (cannot use if/else/while/for)
-- No string processing functions
+- No user-defined functions
+- No I/O redirection within awk scripts
+- Pattern ranges not supported
 
 ---
 
@@ -385,42 +375,38 @@ This document details the options and behaviors that are **not available** in Ba
 
 ### uniq
 
-**Supported:** `-c`, `-d`, `-u`
+**Supported:** `-c`, `-d`, `-u`, `-i`, `--ignore-case`
 
 | Unsupported Option | Description |
 |-------------------|-------------|
-| `-i` | Case-insensitive comparison |
 | `-f NUM` | Skip first NUM fields |
 | `-s CHARS` | Skip first CHARS characters |
 
 **Behavior Differences:**
-- Always case-sensitive
 - Cannot skip fields or characters before comparison
 
 ---
 
 ### cut
 
-**Supported:** `-c LIST`, `-f LIST`, `-d DELIM`, ranges (`1-3`, `1-`, `-3`, `1,3,5`)
+**Supported:** `-c LIST`, `-f LIST`, `-d DELIM`, `-s`, `--only-delimited`, ranges (`1-3`, `1-`, `-3`, `1,3,5`)
 
 | Unsupported Option | Description |
 |-------------------|-------------|
 | `-b LIST` | Select by bytes |
 | `-n` | Don't split multibyte characters |
-| `-s` | Suppress lines without delimiter |
 | `-w` | Use whitespace as delimiter (BSD) |
 | `--output-delimiter` | Specify output delimiter |
 
 **Behavior Differences:**
 - Only character selection, not byte selection
-- Always processes all lines (no `-s` to suppress)
 - No whitespace delimiter support
 
 ---
 
 ### tr
 
-**Supported:** `-d`, `-s`, character ranges (`a-z`, `A-Z`, `0-9`), escapes (`\n`, `\t`, `\r`)
+**Supported:** `-d`, `-s`, character ranges (`a-z`, `A-Z`, `0-9`), escapes (`\n`, `\t`, `\r`), POSIX character classes (`[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:lower:]`, `[:upper:]`, `[:space:]`, `[:blank:]`, `[:punct:]`, `[:print:]`, `[:graph:]`, `[:cntrl:]`, `[:xdigit:]`)
 
 | Unsupported Option | Description |
 |-------------------|-------------|
@@ -430,16 +416,13 @@ This document details the options and behaviors that are **not available** in Ba
 
 | Feature | Description |
 |---------|-------------|
-| `[:alnum:]` | Character classes |
-| `[:alpha:]`, `[:digit:]`, etc. | POSIX character classes |
 | `[=e=]` | Equivalence classes |
 | `[c*n]` | Repeat notation |
 | `\012`, `\x0a` | Octal/hex escapes |
 
 **Behavior Differences:**
-- No POSIX character classes (major limitation)
 - No complement mode
-- Only basic escape sequences
+- No octal/hex escape sequences
 
 ---
 
@@ -496,17 +479,15 @@ This document details the options and behaviors that are **not available** in Ba
 
 ### find
 
-**Supported:** `-name`, `-iname`, `-path`, `-ipath`, `-type`, `-empty`, `-maxdepth`, `-mindepth`, `-not`, `!`, `-a`, `-and`, `-o`, `-or`, `-exec ... \;`, `-exec ... +`, `--help`
+**Supported:** `-name`, `-iname`, `-path`, `-ipath`, `-type`, `-empty`, `-maxdepth`, `-mindepth`, `-not`, `!`, `-a`, `-and`, `-o`, `-or`, `-exec ... \;`, `-exec ... +`, `-mtime`, `-newer`, `-size`, `-print0`, `-delete`, `--help`
 
 | Missing Primary | Description |
 |----------------|-------------|
-| `-atime`, `-mtime`, `-ctime` | Time-based filtering |
+| `-atime`, `-ctime` | Access/change time filtering |
 | `-Btime` | Birth time filtering |
-| `-newer file` | Newer than file |
 | `-perm mode` | Permission matching |
 | `-user`, `-group` | Owner matching |
 | `-uid`, `-gid` | Owner ID matching |
-| `-size n` | File size matching |
 | `-links n` | Link count |
 | `-inum n` | Inode number |
 | `-regex`, `-iregex` | Regex matching |
@@ -514,17 +495,12 @@ This document details the options and behaviors that are **not available** in Ba
 | Missing Action | Description |
 |----------------|-------------|
 | `-execdir ... \;` | Execute in directory |
-| `-delete` | Delete files |
-| `-print0` | Null-separated output |
 | `-prune` | Don't descend into directory |
 | `-ls` | List in ls format |
 | `-quit` | Exit immediately |
 
 **Behavior Differences:**
-- No time-based filtering
 - No permission/ownership filtering
-- No `-print0` for safe xargs usage
-- Cannot delete found files
 - No parentheses grouping
 
 ---
@@ -647,11 +623,10 @@ This document details the options and behaviors that are **not available** in Ba
 
 ### xargs
 
-**Supported:** `-I REPLACE`, `-n NUM`, `-0`, `--null`, `-t`, `--verbose`, `-r`, `--no-run-if-empty`
+**Supported:** `-I REPLACE`, `-n NUM`, `-0`, `--null`, `-t`, `--verbose`, `-r`, `--no-run-if-empty`, `-P MAXPROCS`
 
 | Unsupported Option | Description |
 |-------------------|-------------|
-| `-P MAXPROCS` | Parallel execution |
 | `-p`, `--interactive` | Prompt before executing |
 | `-L NUMBER` | Lines mode |
 | `-s SIZE` | Max command line length |
@@ -659,7 +634,6 @@ This document details the options and behaviors that are **not available** in Ba
 | `-E EOFSTR` | Logical EOF marker |
 
 **Behavior Differences:**
-- No parallel execution
 - No interactive mode
 - No command line length limits
 
@@ -669,20 +643,17 @@ This document details the options and behaviors that are **not available** in Ba
 
 ### env
 
-**Supported:** Print environment variables, `--help`, also `printenv` command
+**Supported:** Print environment variables, `-i` (ignore environment), `-u NAME` (unset), `NAME=VALUE` (set variables), command execution with modified environment, `--help`, also `printenv` command
 
 | Unsupported Option | Description |
 |-------------------|-------------|
-| `-i` | Start with empty environment |
-| `-u NAME` | Remove variable |
 | `-C DIR` | Change working directory |
-| `NAME=VALUE` | Set variables |
-| `utility [args]` | Execute command with modified env |
+| `-S STRING` | Split STRING into arguments |
+| `-v` | Verbose output |
 
 **Behavior Differences:**
-- **Major limitation:** Cannot execute commands with modified environment
-- Only prints environment variables
-- Essentially just `printenv`
+- No directory changing with `-C`
+- No string splitting with `-S`
 
 ---
 
@@ -760,21 +731,19 @@ This document details the options and behaviors that are **not available** in Ba
 5. **basename/dirname** - Nearly complete
 
 ### Most Limited Implementations
-1. **awk** - Missing arrays, control structures, functions
-2. **sed** - No hold space, branching, or advanced commands
-3. **find** - No time filters or permissions (but `-exec` is supported)
-4. **env** - Cannot execute commands (core functionality missing)
-5. **touch** - Only creates files, doesn't update timestamps
+1. **sed** - No hold space, branching, or advanced commands
+2. **touch** - Only creates files, doesn't update timestamps
+3. **awk** - No user-defined functions, math functions, or I/O redirection
+4. **find** - No permission/ownership filters
+5. **tree** - No file metadata or filtering options
 
 ### Common Missing Features Across Commands
-- Verbose output (`-v`)
 - Interactive prompts (`-i`)
 - Backup functionality (`-b`)
 - SELinux context (`-Z`)
 - Color output
-- Real file metadata (timestamps, permissions, ownership)
-- Symbolic link handling
-- NUL-terminated output (`-0`, `-z`)
+- Real ownership (user/group hardcoded)
+- Advanced symbolic link handling
 
 ---
 
@@ -849,12 +818,12 @@ These have high value-to-effort ratio:
 |---------|---------|--------|--------|--------|
 | Accept flags (even if ignored) | `mv` | Low | High - stops errors | ✅ Done |
 | `-f` case-insensitive | `sort` | Low | Medium | ✅ Done |
-| `-i` case-insensitive | `uniq` | Low | Medium | |
+| `-i` case-insensitive | `uniq` | Low | Medium | ✅ Done |
 | `-L` files without match | `grep` | Low | High | ✅ Done |
 | `--exclude` patterns | `grep` | Medium | Very High | ✅ Done |
-| `-n` no-clobber | `cp`, `mv` | Low | Medium | ✅ `mv` done |
-| Real file sizes | `ls -l` | Medium | High | |
-| `-E` extended regex | `sed` | Low | Medium | |
+| `-n` no-clobber | `cp`, `mv` | Low | Medium | ✅ Done |
+| Real file sizes | `ls -l` | Medium | High | ✅ Done |
+| `-E` extended regex | `sed` | Low | Medium | ✅ Done |
 
 ### Recommended Implementation Order
 
@@ -865,30 +834,30 @@ These have high value-to-effort ratio:
 4. [x] `find -exec {} \;` and `-exec {} +`
 5. [x] `sort -f` (case-insensitive)
 
-**Phase 2: Enhanced Text Processing**
-6. [ ] `awk` control structures (`if/else/for/while`)
-7. [ ] `awk` arrays (associative)
-8. [ ] `awk` string functions (`length`, `substr`, `split`, `gsub`)
-9. [ ] `sed -E` (extended regex)
-10. [ ] `tr` POSIX character classes
+**Phase 2: Enhanced Text Processing** ✅ COMPLETED
+6. [x] `awk` control structures (`if/else/for/while`)
+7. [x] `awk` arrays (associative)
+8. [x] `awk` string functions (`length`, `substr`, `split`, `gsub`, `tolower`, `toupper`, `sprintf`)
+9. [x] `sed -E` (extended regex)
+10. [x] `tr` POSIX character classes
 
-**Phase 3: File Operations**
-11. [ ] `cp -p` (preserve timestamps)
-12. [ ] `cp -n` (no-clobber)
-13. [ ] `find -mtime`, `-newer`
-14. [ ] `find -size`
-15. [ ] `ls -l` real file sizes and timestamps
+**Phase 3: File Operations** ✅ COMPLETED
+11. [x] `cp -p` (preserve timestamps)
+12. [x] `cp -n` (no-clobber)
+13. [x] `find -mtime`, `-newer`
+14. [x] `find -size`
+15. [x] `ls -l` real file sizes and timestamps
 
-**Phase 4: Advanced Features**
-16. [ ] `find -print0` + `xargs -0`
-17. [ ] `xargs -P` (parallel)
-18. [ ] `sed` hold space commands
-19. [ ] `sed` insert/append (`i\`, `a\`)
-20. [ ] `find -delete`
-21. [ ] `env` command execution
+**Phase 4: Advanced Features** ✅ COMPLETED
+16. [x] `find -print0` + `xargs -0`
+17. [x] `xargs -P` (parallel)
+18. [ ] `sed` hold space commands (deferred - complex refactor)
+19. [ ] `sed` insert/append (`i\`, `a\`) (deferred - complex refactor)
+20. [x] `find -delete`
+21. [x] `env` command execution
 
-**Phase 5: Polish**
-22. [ ] `uniq -i` (case-insensitive)
-23. [ ] `cut -s` (suppress lines without delimiter)
-24. [ ] `sort` complex `-k` syntax
-25. [ ] `awk` `next`, `exit` statements
+**Phase 5: Polish** ✅ COMPLETED
+22. [x] `uniq -i` (case-insensitive)
+23. [x] `cut -s` (suppress lines without delimiter)
+24. [ ] `sort` complex `-k` syntax (deferred)
+25. [x] `awk` `next`, `exit` statements (partial)

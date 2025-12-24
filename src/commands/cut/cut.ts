@@ -1,5 +1,18 @@
 import type { Command, CommandContext, ExecResult } from "../../types.js";
-import { unknownOption } from "../help.js";
+import { hasHelpFlag, showHelp, unknownOption } from "../help.js";
+
+const cutHelp = {
+  name: "cut",
+  summary: "remove sections from each line of files",
+  usage: "cut [OPTION]... [FILE]...",
+  options: [
+    "-c LIST              select only these characters",
+    "-d DELIM             use DELIM instead of TAB for field delimiter",
+    "-f LIST              select only these fields",
+    "-s, --only-delimited  do not print lines without delimiters",
+    "    --help           display this help and exit",
+  ],
+};
 
 interface CutRange {
   start: number;
@@ -46,9 +59,14 @@ function extractByRanges(items: string[], ranges: CutRange[]): string[] {
 export const cutCommand: Command = {
   name: "cut",
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
+    if (hasHelpFlag(args)) {
+      return showHelp(cutHelp);
+    }
+
     let delimiter = "\t";
     let fieldSpec: string | null = null;
     let charSpec: string | null = null;
+    let suppressNoDelim = false;
     const files: string[] = [];
 
     // Parse arguments
@@ -66,10 +84,24 @@ export const cutCommand: Command = {
         charSpec = args[++i];
       } else if (arg.startsWith("-c")) {
         charSpec = arg.slice(2);
+      } else if (arg === "-s" || arg === "--only-delimited") {
+        suppressNoDelim = true;
       } else if (arg.startsWith("--")) {
         return unknownOption("cut", arg);
       } else if (arg.startsWith("-")) {
-        return unknownOption("cut", arg);
+        // Check for combined short options like -sf1
+        let unknown = false;
+        for (const c of arg.slice(1)) {
+          if (c === "s") {
+            suppressNoDelim = true;
+          } else if (!"dfc".includes(c)) {
+            unknown = true;
+            break;
+          }
+        }
+        if (unknown) {
+          return unknownOption("cut", arg);
+        }
       } else {
         files.push(arg);
       }
@@ -115,7 +147,7 @@ export const cutCommand: Command = {
 
     for (const line of lines) {
       if (charSpec) {
-        // Character mode
+        // Character mode (-s has no effect in character mode)
         const chars = line.split("");
         const selected: string[] = [];
         for (const range of ranges) {
@@ -130,6 +162,10 @@ export const cutCommand: Command = {
         output += `${selected.join("")}\n`;
       } else {
         // Field mode
+        // If -s is set, skip lines that don't contain the delimiter
+        if (suppressNoDelim && !line.includes(delimiter)) {
+          continue;
+        }
         const fields = line.split(delimiter);
         const selected = extractByRanges(fields, ranges);
         output += `${selected.join(delimiter)}\n`;

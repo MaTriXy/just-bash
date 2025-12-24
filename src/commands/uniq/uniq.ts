@@ -1,12 +1,30 @@
 import type { Command, CommandContext, ExecResult } from "../../types.js";
-import { unknownOption } from "../help.js";
+import { hasHelpFlag, showHelp, unknownOption } from "../help.js";
+
+const uniqHelp = {
+  name: "uniq",
+  summary: "report or omit repeated lines",
+  usage: "uniq [OPTION]... [INPUT [OUTPUT]]",
+  options: [
+    "-c, --count        prefix lines by the number of occurrences",
+    "-d, --repeated     only print duplicate lines",
+    "-i, --ignore-case  ignore case when comparing",
+    "-u, --unique       only print unique lines",
+    "    --help         display this help and exit",
+  ],
+};
 
 export const uniqCommand: Command = {
   name: "uniq",
   async execute(args: string[], ctx: CommandContext): Promise<ExecResult> {
+    if (hasHelpFlag(args)) {
+      return showHelp(uniqHelp);
+    }
+
     let count = false;
     let duplicatesOnly = false;
     let uniqueOnly = false;
+    let ignoreCase = false;
     const files: string[] = [];
 
     // Parse arguments
@@ -17,6 +35,8 @@ export const uniqCommand: Command = {
         duplicatesOnly = true;
       } else if (arg === "-u" || arg === "--unique") {
         uniqueOnly = true;
+      } else if (arg === "-i" || arg === "--ignore-case") {
+        ignoreCase = true;
       } else if (arg.startsWith("--")) {
         return unknownOption("uniq", arg);
       } else if (arg.startsWith("-") && !arg.startsWith("--")) {
@@ -25,6 +45,7 @@ export const uniqCommand: Command = {
           if (char === "c") count = true;
           else if (char === "d") duplicatesOnly = true;
           else if (char === "u") uniqueOnly = true;
+          else if (char === "i") ignoreCase = true;
           else return unknownOption("uniq", `-${char}`);
         }
       } else {
@@ -69,8 +90,15 @@ export const uniqCommand: Command = {
     let currentLine = lines[0];
     let currentCount = 1;
 
+    const compareLines = (a: string, b: string): boolean => {
+      if (ignoreCase) {
+        return a.toLowerCase() === b.toLowerCase();
+      }
+      return a === b;
+    };
+
     for (let i = 1; i < lines.length; i++) {
-      if (lines[i] === currentLine) {
+      if (compareLines(lines[i], currentLine)) {
         currentCount++;
       } else {
         result.push({ line: currentLine, count: currentCount });
