@@ -22,6 +22,7 @@ import type { ExecResult } from "../types.js";
 import { evaluateArithmetic } from "./arithmetic.js";
 import { matchPattern } from "./conditionals.js";
 import { expandWord, expandWordWithGlob } from "./expansion.js";
+import { ErrexitError } from "./interpreter.js";
 import type { InterpreterContext } from "./types.js";
 
 export async function executeIf(
@@ -34,30 +35,58 @@ export async function executeIf(
 
   for (const clause of node.clauses) {
     let conditionExitCode = 0;
-    for (const stmt of clause.condition) {
-      const result = await ctx.executeStatement(stmt);
-      stdout += result.stdout;
-      stderr += result.stderr;
-      conditionExitCode = result.exitCode;
-    }
 
-    if (conditionExitCode === 0) {
-      for (const stmt of clause.body) {
+    // Condition evaluation should not trigger errexit
+    const savedInCondition = ctx.state.inCondition;
+    ctx.state.inCondition = true;
+    try {
+      for (const stmt of clause.condition) {
         const result = await ctx.executeStatement(stmt);
         stdout += result.stdout;
         stderr += result.stderr;
-        exitCode = result.exitCode;
+        conditionExitCode = result.exitCode;
+      }
+    } finally {
+      ctx.state.inCondition = savedInCondition;
+    }
+
+    if (conditionExitCode === 0) {
+      try {
+        for (const stmt of clause.body) {
+          const result = await ctx.executeStatement(stmt);
+          stdout += result.stdout;
+          stderr += result.stderr;
+          exitCode = result.exitCode;
+        }
+      } catch (error) {
+        if (error instanceof ErrexitError) {
+          error.stdout = stdout + error.stdout;
+          error.stderr = stderr + error.stderr;
+          throw error;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
       }
       return { stdout, stderr, exitCode };
     }
   }
 
   if (node.elseBody) {
-    for (const stmt of node.elseBody) {
-      const result = await ctx.executeStatement(stmt);
-      stdout += result.stdout;
-      stderr += result.stderr;
-      exitCode = result.exitCode;
+    try {
+      for (const stmt of node.elseBody) {
+        const result = await ctx.executeStatement(stmt);
+        stdout += result.stdout;
+        stderr += result.stderr;
+        exitCode = result.exitCode;
+      }
+    } catch (error) {
+      if (error instanceof ErrexitError) {
+        error.stdout = stdout + error.stdout;
+        error.stderr = stderr + error.stderr;
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
     }
   }
 
@@ -99,20 +128,21 @@ export async function executeFor(
 
     ctx.state.env[node.variable] = value;
 
-    for (const stmt of node.body) {
-      try {
+    try {
+      for (const stmt of node.body) {
         const result = await ctx.executeStatement(stmt);
         stdout += result.stdout;
         stderr += result.stderr;
         exitCode = result.exitCode;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          stdout,
-          stderr: `${stderr + message}\n`,
-          exitCode: 1,
-        };
       }
+    } catch (error) {
+      if (error instanceof ErrexitError) {
+        error.stdout = stdout + error.stdout;
+        error.stderr = stderr + error.stderr;
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
     }
   }
 
@@ -151,16 +181,21 @@ export async function executeCStyleFor(
       if (condResult === 0) break;
     }
 
-    for (const stmt of node.body) {
-      try {
+    try {
+      for (const stmt of node.body) {
         const result = await ctx.executeStatement(stmt);
         stdout += result.stdout;
         stderr += result.stderr;
         exitCode = result.exitCode;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
       }
+    } catch (error) {
+      if (error instanceof ErrexitError) {
+        error.stdout = stdout + error.stdout;
+        error.stderr = stderr + error.stderr;
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
     }
 
     if (node.update) {
@@ -193,30 +228,38 @@ export async function executeWhile(
     }
 
     let conditionExitCode = 0;
-    for (const stmt of node.condition) {
-      try {
+
+    // Condition evaluation should not trigger errexit
+    const savedInCondition = ctx.state.inCondition;
+    ctx.state.inCondition = true;
+    try {
+      for (const stmt of node.condition) {
         const result = await ctx.executeStatement(stmt);
         stdout += result.stdout;
         stderr += result.stderr;
         conditionExitCode = result.exitCode;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
       }
+    } finally {
+      ctx.state.inCondition = savedInCondition;
     }
 
     if (conditionExitCode !== 0) break;
 
-    for (const stmt of node.body) {
-      try {
+    try {
+      for (const stmt of node.body) {
         const result = await ctx.executeStatement(stmt);
         stdout += result.stdout;
         stderr += result.stderr;
         exitCode = result.exitCode;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
       }
+    } catch (error) {
+      if (error instanceof ErrexitError) {
+        error.stdout = stdout + error.stdout;
+        error.stderr = stderr + error.stderr;
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
     }
   }
 
@@ -245,30 +288,38 @@ export async function executeUntil(
     }
 
     let conditionExitCode = 0;
-    for (const stmt of node.condition) {
-      try {
+
+    // Condition evaluation should not trigger errexit
+    const savedInCondition = ctx.state.inCondition;
+    ctx.state.inCondition = true;
+    try {
+      for (const stmt of node.condition) {
         const result = await ctx.executeStatement(stmt);
         stdout += result.stdout;
         stderr += result.stderr;
         conditionExitCode = result.exitCode;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
       }
+    } finally {
+      ctx.state.inCondition = savedInCondition;
     }
 
     if (conditionExitCode === 0) break;
 
-    for (const stmt of node.body) {
-      try {
+    try {
+      for (const stmt of node.body) {
         const result = await ctx.executeStatement(stmt);
         stdout += result.stdout;
         stderr += result.stderr;
         exitCode = result.exitCode;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
       }
+    } catch (error) {
+      if (error instanceof ErrexitError) {
+        error.stdout = stdout + error.stdout;
+        error.stderr = stderr + error.stderr;
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
     }
   }
 
@@ -297,11 +348,21 @@ export async function executeCase(
     }
 
     if (matched) {
-      for (const stmt of item.body) {
-        const result = await ctx.executeStatement(stmt);
-        stdout += result.stdout;
-        stderr += result.stderr;
-        exitCode = result.exitCode;
+      try {
+        for (const stmt of item.body) {
+          const result = await ctx.executeStatement(stmt);
+          stdout += result.stdout;
+          stderr += result.stderr;
+          exitCode = result.exitCode;
+        }
+      } catch (error) {
+        if (error instanceof ErrexitError) {
+          error.stdout = stdout + error.stdout;
+          error.stderr = stderr + error.stderr;
+          throw error;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
       }
 
       if (item.terminator === ";;") {

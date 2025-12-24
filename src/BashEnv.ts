@@ -74,6 +74,10 @@ export class BashEnv {
       callDepth: 0,
       commandCount: 0,
       lastExitCode: 0,
+      options: {
+        errexit: false,
+      },
+      inCondition: false,
     };
 
     // Create essential directories for VirtualFs (only for default layout)

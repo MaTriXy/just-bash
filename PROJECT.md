@@ -199,10 +199,6 @@ xargs — build argument lists
   - But their implementations should only be loaded when they are actually called
 - Make sure that files support Buffers and encoding
 
-## All before this is done
-
-Woohoo
-
 ## Implementation phase 13
 
 - Do we handle stop of execution in multi-line script for non-zero return values?
@@ -217,3 +213,7 @@ Woohoo
 ## Implementation phase 15
 
 - Implement set -e
+
+## All before this is done
+
+Woohoo

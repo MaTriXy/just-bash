@@ -45,27 +45,35 @@ export async function callFunction(
   ctx.state.env["@"] = args.join(" ");
   ctx.state.env["#"] = String(args.length);
 
-  const result = await ctx.executeCommand(func.body, "");
-
-  const localScope = ctx.state.localScopes.pop();
-  if (localScope) {
-    for (const [varName, originalValue] of localScope) {
-      if (originalValue === undefined) {
-        delete ctx.state.env[varName];
-      } else {
-        ctx.state.env[varName] = originalValue;
+  const cleanup = (): void => {
+    const localScope = ctx.state.localScopes.pop();
+    if (localScope) {
+      for (const [varName, originalValue] of localScope) {
+        if (originalValue === undefined) {
+          delete ctx.state.env[varName];
+        } else {
+          ctx.state.env[varName] = originalValue;
+        }
       }
     }
-  }
 
-  for (const [key, value] of Object.entries(savedPositional)) {
-    if (value === undefined) {
-      delete ctx.state.env[key];
-    } else {
-      ctx.state.env[key] = value;
+    for (const [key, value] of Object.entries(savedPositional)) {
+      if (value === undefined) {
+        delete ctx.state.env[key];
+      } else {
+        ctx.state.env[key] = value;
+      }
     }
-  }
 
-  ctx.state.callDepth--;
-  return result;
+    ctx.state.callDepth--;
+  };
+
+  try {
+    const result = await ctx.executeCommand(func.body, "");
+    cleanup();
+    return result;
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }

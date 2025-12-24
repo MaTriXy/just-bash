@@ -23,3 +23,4 @@ Usage: pnpm dev:exec '<bash script>'
 - Instead use `pnpm dev:exec ""`
 - Always make sure to build before using dist
 - Biome rules often have the same name as eslint rules (if you are lookinf for one)
+- Error / show usage on unknown flags in commands and built-ins (unless real bash also ignores)

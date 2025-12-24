@@ -31,6 +31,7 @@ import {
   handleExit,
   handleExport,
   handleLocal,
+  handleSet,
   handleUnset,
 } from "./builtins.js";
 import { evaluateConditional, evaluateTestArgs } from "./conditionals.js";
@@ -48,6 +49,20 @@ import { applyRedirections } from "./redirections.js";
 import type { InterpreterContext, InterpreterState } from "./types.js";
 
 export type { InterpreterContext, InterpreterState } from "./types.js";
+
+/**
+ * Error thrown when set -e (errexit) is enabled and a command fails.
+ */
+export class ErrexitError extends Error {
+  constructor(
+    public readonly exitCode: number,
+    public stdout: string = "",
+    public stderr: string = "",
+  ) {
+    super(`errexit: command exited with status ${exitCode}`);
+    this.name = "ErrexitError";
+  }
+}
 
 export interface InterpreterOptions {
   fs: IFileSystem;
@@ -85,13 +100,25 @@ export class Interpreter {
     let stderr = "";
     let exitCode = 0;
 
-    for (const statement of node.statements) {
-      const result = await this.executeStatement(statement);
-      stdout += result.stdout;
-      stderr += result.stderr;
-      exitCode = result.exitCode;
-      this.ctx.state.lastExitCode = exitCode;
-      this.ctx.state.env["?"] = String(exitCode);
+    try {
+      for (const statement of node.statements) {
+        const result = await this.executeStatement(statement);
+        stdout += result.stdout;
+        stderr += result.stderr;
+        exitCode = result.exitCode;
+        this.ctx.state.lastExitCode = exitCode;
+        this.ctx.state.env["?"] = String(exitCode);
+      }
+    } catch (error) {
+      if (error instanceof ErrexitError) {
+        stdout += error.stdout;
+        stderr += error.stderr;
+        exitCode = error.exitCode;
+        this.ctx.state.lastExitCode = exitCode;
+        this.ctx.state.env["?"] = String(exitCode);
+        return { stdout, stderr, exitCode };
+      }
+      throw error;
     }
 
     return { stdout, stderr, exitCode };
@@ -110,6 +137,8 @@ export class Interpreter {
     let stdout = "";
     let stderr = "";
     let exitCode = 0;
+    let lastExecutedIndex = -1;
+    let lastPipelineNegated = false;
 
     for (let i = 0; i < node.pipelines.length; i++) {
       const pipeline = node.pipelines[i];
@@ -122,6 +151,23 @@ export class Interpreter {
       stdout += result.stdout;
       stderr += result.stderr;
       exitCode = result.exitCode;
+      lastExecutedIndex = i;
+      lastPipelineNegated = pipeline.negated;
+    }
+
+    // Check errexit (set -e): exit if command failed
+    // Exceptions:
+    // - Command was in a && or || list and wasn't the final command (short-circuit)
+    // - Command was negated with !
+    // - Command is part of a condition in if/while/until
+    if (
+      this.ctx.state.options.errexit &&
+      exitCode !== 0 &&
+      lastExecutedIndex === node.pipelines.length - 1 &&
+      !lastPipelineNegated &&
+      !this.ctx.state.inCondition
+    ) {
+      throw new ErrexitError(exitCode);
     }
 
     return { stdout, stderr, exitCode };
@@ -301,6 +347,9 @@ export class Interpreter {
     if (commandName === "local") {
       return handleLocal(this.ctx, args);
     }
+    if (commandName === "set") {
+      return handleSet(this.ctx, args);
+    }
 
     // Test commands
     if (commandName === "[[") {
@@ -372,11 +421,23 @@ export class Interpreter {
     let stderr = "";
     let exitCode = 0;
 
-    for (const stmt of node.body) {
-      const result = await this.executeStatement(stmt);
-      stdout += result.stdout;
-      stderr += result.stderr;
-      exitCode = result.exitCode;
+    try {
+      for (const stmt of node.body) {
+        const result = await this.executeStatement(stmt);
+        stdout += result.stdout;
+        stderr += result.stderr;
+        exitCode = result.exitCode;
+      }
+    } catch (error) {
+      this.ctx.state.env = savedEnv;
+      this.ctx.state.cwd = savedCwd;
+      if (error instanceof ErrexitError) {
+        error.stdout = stdout + error.stdout;
+        error.stderr = stderr + error.stderr;
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
     }
 
     this.ctx.state.env = savedEnv;
@@ -390,11 +451,21 @@ export class Interpreter {
     let stderr = "";
     let exitCode = 0;
 
-    for (const stmt of node.body) {
-      const result = await this.executeStatement(stmt);
-      stdout += result.stdout;
-      stderr += result.stderr;
-      exitCode = result.exitCode;
+    try {
+      for (const stmt of node.body) {
+        const result = await this.executeStatement(stmt);
+        stdout += result.stdout;
+        stderr += result.stderr;
+        exitCode = result.exitCode;
+      }
+    } catch (error) {
+      if (error instanceof ErrexitError) {
+        error.stdout = stdout + error.stdout;
+        error.stderr = stderr + error.stderr;
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return { stdout, stderr: `${stderr + message}\n`, exitCode: 1 };
     }
 
     return { stdout, stderr, exitCode };

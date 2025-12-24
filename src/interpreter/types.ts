@@ -11,6 +11,11 @@ import type {
 import type { IFileSystem } from "../fs-interface.js";
 import type { CommandRegistry, ExecResult } from "../types.js";
 
+export interface ShellOptions {
+  /** set -e: Exit immediately if a command exits with non-zero status */
+  errexit: boolean;
+}
+
 export interface InterpreterState {
   env: Record<string, string>;
   cwd: string;
@@ -20,6 +25,10 @@ export interface InterpreterState {
   callDepth: number;
   commandCount: number;
   lastExitCode: number;
+  /** Shell options (set -e, etc.) */
+  options: ShellOptions;
+  /** True when executing condition for if/while/until (errexit doesn't apply) */
+  inCondition: boolean;
 }
 
 export interface InterpreterContext {
