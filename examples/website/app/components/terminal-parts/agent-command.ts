@@ -185,6 +185,15 @@ export function createAgentCommand(term: TerminalWriter) {
                 resetThinkingTimer(); // No complete line yet, reset timer
               }
             }
+            // Handle text-end - flush buffer and ensure newline
+            else if (data.type === "text-end") {
+              clearThinking();
+              if (lineBuffer) {
+                term.write(formatForTerminal(formatMarkdown(lineBuffer)));
+                lineBuffer = "";
+              }
+              term.write("\r\n");
+            }
             // Handle tool input - show header immediately
             else if (data.type === "tool-input-available" && data.toolCallId) {
               clearThinking(); // Clear "Thinking..." before showing tool
