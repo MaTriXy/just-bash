@@ -81,7 +81,7 @@ export default function TerminalComponent() {
 
       // Pre-populate command if history is empty
       if (inputHandler.history.length === 0) {
-        inputHandler.setInitialCommand('agent "Explain what just-bash is for"');
+        inputHandler.setInitialCommand('agent "What is just-bash?"');
       }
     });
 

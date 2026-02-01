@@ -595,11 +595,11 @@ export class LiteTerminal {
   private calculateCols(): void {
     if (!this.container || !this.outputElement) return;
 
-    const style = getComputedStyle(this.outputElement);
     const charWidth = this.measureCharWidth();
-    const padding =
-      parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
-    const availableWidth = this.container.clientWidth - padding;
+    // Use window width since we're using body scroll
+    // Account for container padding (16px each side by default)
+    const containerPadding = 32;
+    const availableWidth = (this.container.clientWidth || window.innerWidth) - containerPadding;
 
     this._cols = Math.floor(availableWidth / charWidth) || 80;
   }

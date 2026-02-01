@@ -32,6 +32,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-mono), "Geist Mono", "SF Mono", Menlo, monospace;
+  overflow-x: hidden;
 }
 
 noscript pre {
@@ -71,7 +72,9 @@ noscript pre {
   position: relative;
   outline: none;
   min-height: 100dvh;
+  max-width: 100%;
   padding-bottom: calc(50vh + env(safe-area-inset-bottom, 0px));
+  overflow-wrap: break-word;
 }
 
 .lite-terminal-output {
@@ -79,6 +82,8 @@ noscript pre {
   padding: 0;
   white-space: pre-wrap;
   word-break: break-all;
+  max-width: 100%;
+  contain: content;
 }
 
 .lite-terminal-cursor {
