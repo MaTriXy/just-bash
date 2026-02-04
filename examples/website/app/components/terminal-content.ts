@@ -695,7 +695,7 @@ limitations under the License.
 
 export const FILE_PACKAGE_JSON = `{
   "name": "just-bash",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "description": "A simulated bash environment with virtual filesystem",
   "repository": {
     "type": "git",
