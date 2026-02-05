@@ -7,6 +7,8 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { Bash } from "../../index.js";
+import { Lexer } from "../../parser/lexer.js";
+import { Parser, parse } from "../../parser/parser.js";
 
 describe("DoS Prevention - Execution Limits", () => {
   let bash: Bash;
@@ -523,6 +525,109 @@ describe("DoS Prevention - Execution Limits", () => {
       `);
       expect(result.exitCode).toBe(42);
       expect(result.stdout).toBe("1\n2\n");
+    });
+  });
+
+  describe("Parser Depth Limits", () => {
+    it("should reject deeply nested if statements", () => {
+      // Build a script with 300 nested if-then-fi blocks
+      const depth = 300;
+      let script = "";
+      for (let i = 0; i < depth; i++) {
+        script += "if true; then\n";
+      }
+      script += "echo deep\n";
+      for (let i = 0; i < depth; i++) {
+        script += "fi\n";
+      }
+
+      expect(() => parse(script)).toThrow(
+        /Maximum parser nesting depth exceeded/,
+      );
+    });
+
+    it("should reject deeply nested subshells", () => {
+      const depth = 300;
+      let script = "";
+      for (let i = 0; i < depth; i++) {
+        script += "( ";
+      }
+      script += "echo deep";
+      for (let i = 0; i < depth; i++) {
+        script += " )";
+      }
+
+      expect(() => parse(script)).toThrow(
+        /Maximum parser nesting depth exceeded/,
+      );
+    });
+
+    it("should reject deeply nested while loops", () => {
+      const depth = 300;
+      let script = "";
+      for (let i = 0; i < depth; i++) {
+        script += "while true; do\n";
+      }
+      script += "echo deep\n";
+      for (let i = 0; i < depth; i++) {
+        script += "done\n";
+      }
+
+      expect(() => parse(script)).toThrow(
+        /Maximum parser nesting depth exceeded/,
+      );
+    });
+
+    it("should allow moderately nested constructs", () => {
+      // 10 levels of nesting should be fine
+      const depth = 10;
+      let script = "";
+      for (let i = 0; i < depth; i++) {
+        script += "if true; then\n";
+      }
+      script += "echo ok\n";
+      for (let i = 0; i < depth; i++) {
+        script += "fi\n";
+      }
+
+      expect(() => parse(script)).not.toThrow();
+    });
+
+    it("should reset depth when reusing Parser via parseTokens", () => {
+      const parser = new Parser();
+
+      // First parse: deeply nested script that triggers the limit
+      const depth = 300;
+      let deepScript = "";
+      for (let i = 0; i < depth; i++) {
+        deepScript += "if true; then\n";
+      }
+      deepScript += "echo deep\n";
+      for (let i = 0; i < depth; i++) {
+        deepScript += "fi\n";
+      }
+      expect(() => parser.parse(deepScript)).toThrow(
+        /Maximum parser nesting depth exceeded/,
+      );
+
+      // Second parse on the same instance: simple script via parseTokens
+      // This must succeed — counters should be reset
+      const simpleTokens = new Lexer("echo hello").tokenize();
+      expect(() => parser.parseTokens(simpleTokens)).not.toThrow();
+    });
+
+    it("should reset iteration count when reusing Parser via parseTokens", () => {
+      const parser = new Parser();
+
+      // First parse: a valid script
+      const first = parser.parse("echo first");
+      expect(first.statements.length).toBe(1);
+
+      // Second parse via parseTokens: should work without hitting
+      // a stale iteration count from the first parse
+      const tokens = new Lexer("echo second").tokenize();
+      const second = parser.parseTokens(tokens);
+      expect(second.statements.length).toBe(1);
     });
   });
 });
