@@ -578,7 +578,10 @@ export class ReadWriteFs implements IFileSystem {
     // Convert to real path - this is where the symlink should actually point.
     // Use canonicalRoot (not this.root) so the relative path computation is
     // consistent with the canonical link directory (avoids /tmp vs /private/tmp mismatch).
-    const resolvedRealTarget = nodePath.join(this.canonicalRoot, resolvedVirtualTarget);
+    const resolvedRealTarget = nodePath.join(
+      this.canonicalRoot,
+      resolvedVirtualTarget,
+    );
 
     // For relative symlinks, compute the correct relative path from link to target within root
     // For absolute symlinks, use the absolute path within root
