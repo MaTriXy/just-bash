@@ -364,4 +364,15 @@ describe("split", () => {
       expect(result.stdout).toContain("Usage");
     });
   });
+
+  describe("security limits", () => {
+    it("should reject excessive chunk count", async () => {
+      const bash = new Bash({
+        files: { "/test.txt": "hello\n" },
+      });
+      const result = await bash.exec("split -n 200000 /test.txt");
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("too many output files");
+    });
+  });
 });

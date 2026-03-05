@@ -48,7 +48,7 @@ export const whichCommand: Command = {
 
       for (const dir of pathDirs) {
         if (!dir) continue;
-        const fullPath = `${dir}/${name}`;
+        const fullPath = ctx.fs.resolvePath(dir, name);
         if (await ctx.fs.exists(fullPath)) {
           found = true;
           if (!silent) {

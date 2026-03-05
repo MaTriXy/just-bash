@@ -80,7 +80,8 @@ describe("sleep command", () => {
 
       const result = await env.exec("sleep 1d");
       expect(result.exitCode).toBe(0);
-      expect(sleptMs).toBe(86400000);
+      // Capped to MAX_SLEEP_MS (1 hour) to prevent DoS
+      expect(sleptMs).toBe(3600000);
     });
 
     it("should handle decimal values with suffix", async () => {

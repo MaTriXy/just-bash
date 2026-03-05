@@ -15,6 +15,9 @@ NUMBER may be a decimal number.`,
   options: ["    --help display this help and exit"],
 };
 
+/** Maximum sleep duration: 1 hour (prevents DoS via indefinite blocking) */
+const MAX_SLEEP_MS = 3_600_000;
+
 /**
  * Parse sleep duration string to milliseconds
  */
@@ -67,6 +70,11 @@ export const sleepCommand: Command = {
         };
       }
       totalMs += ms;
+    }
+
+    // Cap to prevent indefinite blocking
+    if (totalMs > MAX_SLEEP_MS) {
+      totalMs = MAX_SLEEP_MS;
     }
 
     // Use mock sleep if available in context, otherwise real setTimeout

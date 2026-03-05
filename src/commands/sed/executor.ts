@@ -471,7 +471,24 @@ function processReplacement(
   return result;
 }
 
-function executeCommand(cmd: SedCommand, state: SedState): void {
+function checkSpaceSize(
+  space: string,
+  maxLen: number,
+  spaceName: string,
+): void {
+  if (maxLen > 0 && space.length > maxLen) {
+    throw new ExecutionLimitError(
+      `sed: ${spaceName} size limit exceeded (${maxLen} bytes)`,
+      "string_length",
+    );
+  }
+}
+
+function executeCommand(
+  cmd: SedCommand,
+  state: SedState,
+  limits?: SedExecutionLimits,
+): void {
   const { lineNumber, totalLines, patternSpace } = state;
 
   // Labels don't have addresses and are handled separately
@@ -657,6 +674,11 @@ function executeCommand(cmd: SedCommand, state: SedState): void {
       } else {
         state.holdSpace = state.patternSpace;
       }
+      checkSpaceSize(
+        state.holdSpace,
+        limits?.maxStringLength ?? 0,
+        "hold space",
+      );
       break;
 
     case "get":
@@ -667,6 +689,11 @@ function executeCommand(cmd: SedCommand, state: SedState): void {
     case "getAppend":
       // G - Append hold space to pattern space (with newline)
       state.patternSpace += `\n${state.holdSpace}`;
+      checkSpaceSize(
+        state.patternSpace,
+        limits?.maxStringLength ?? 0,
+        "pattern space",
+      );
       break;
 
     case "exchange": {
@@ -1108,7 +1135,7 @@ export function executeCommands(
       continue;
     }
 
-    executeCommand(cmd, state);
+    executeCommand(cmd, state, limits);
     i++;
   }
 

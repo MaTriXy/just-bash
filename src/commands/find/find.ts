@@ -337,8 +337,8 @@ export const findCommand: Command = {
         const { path: currentPath, depth, typeInfo } = item;
         traceCounters.nodeCount++;
 
-        // Check maxdepth
-        if (maxDepth !== null && depth > maxDepth) {
+        // Check maxdepth (default safety limit of 256 if not specified)
+        if (depth > (maxDepth ?? 256)) {
           return null;
         }
 
@@ -402,7 +402,7 @@ export const findCommand: Command = {
 
         // Optimization: skip reading directory contents if we're at maxdepth
         // Exception: if -empty is used, we need to read to check if directory is empty
-        const atMaxDepth = maxDepth !== null && depth >= maxDepth;
+        const atMaxDepth = depth >= (maxDepth ?? 256);
         // Path pattern pruning: for patterns like "*/pulls/*.json", don't descend into "pulls" subdirs
         // But we still need to read the directory to check its direct children (files)
         const inTerminalDir =

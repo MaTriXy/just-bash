@@ -331,4 +331,5 @@ export interface RangeState {
 
 export interface SedExecutionLimits {
   maxIterations: number; // Max branch iterations per line (default: 10000)
+  maxStringLength: number; // Max hold/pattern space size in bytes (0 = unlimited)
 }

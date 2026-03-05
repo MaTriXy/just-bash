@@ -105,6 +105,12 @@ export function evalControlBuiltin(
 
     case "range": {
       if (args.length === 0) return [];
+      // range() is bounded by definition (terminates when reaching end),
+      // so we use a higher limit than while/until/repeat loops.  Prevents
+      // memory exhaustion from range(1e15) while allowing legitimate use
+      // cases like date arithmetic (range(365*67) = 24455 elements).
+      const maxRange = Math.max(ctx.limits.maxIterations * 100, 1_000_000);
+      const rangeExceeded = (result: number[]) => result.length >= maxRange;
       const startsVals = evaluate(value, args[0], ctx);
       if (args.length === 1) {
         // range(n) - single arg, range from 0 to n
@@ -112,7 +118,10 @@ export function evalControlBuiltin(
         const result: number[] = [];
         for (const n of startsVals) {
           const num = n as number;
-          for (let i = 0; i < num; i++) result.push(i);
+          for (let i = 0; i < num; i++) {
+            result.push(i);
+            if (rangeExceeded(result)) return result;
+          }
         }
         return result;
       }
@@ -125,7 +134,10 @@ export function evalControlBuiltin(
           for (const e of endsVals) {
             const start = s as number;
             const end = e as number;
-            for (let i = start; i < end; i++) result.push(i);
+            for (let i = start; i < end; i++) {
+              result.push(i);
+              if (rangeExceeded(result)) return result;
+            }
           }
         }
         return result;
@@ -141,9 +153,15 @@ export function evalControlBuiltin(
             const step = st as number;
             if (step === 0) continue; // Avoid infinite loop
             if (step > 0) {
-              for (let i = start; i < end; i += step) result.push(i);
+              for (let i = start; i < end; i += step) {
+                result.push(i);
+                if (rangeExceeded(result)) return result;
+              }
             } else {
-              for (let i = start; i > end; i += step) result.push(i);
+              for (let i = start; i > end; i += step) {
+                result.push(i);
+                if (rangeExceeded(result)) return result;
+              }
             }
           }
         }

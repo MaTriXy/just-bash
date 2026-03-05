@@ -178,4 +178,44 @@ describe("printf", () => {
       expect(result.exitCode).toBe(0);
     });
   });
+
+  describe("-v variable name validation", () => {
+    it("should accept valid variable names", async () => {
+      const env = new Bash();
+      const result = await env.exec('printf -v myvar "%s" hello; echo $myvar');
+      expect(result.stdout).toBe("hello\n");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("should accept array subscript with index", async () => {
+      const env = new Bash();
+      const result = await env.exec(
+        "printf -v 'arr[0]' '%s' hello; echo ${arr[0]}",
+      );
+      expect(result.stdout).toBe("hello\n");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("should accept array subscript with @", async () => {
+      const env = new Bash();
+      const result = await env.exec(
+        "printf -v 'arr[@]' '%s' hello; echo ${arr[@]}",
+      );
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("should reject invalid variable names with special chars", async () => {
+      const env = new Bash();
+      const result = await env.exec("printf -v 'x[;rm -rf /]' '%s' hello");
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain("not a valid identifier");
+    });
+
+    it("should reject variable names with path traversal", async () => {
+      const env = new Bash();
+      const result = await env.exec("printf -v 'x[../../etc]' '%s' hello");
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain("not a valid identifier");
+    });
+  });
 });

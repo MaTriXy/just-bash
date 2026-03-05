@@ -94,5 +94,40 @@ describe("JQ Execution Limits", () => {
       expect(result.exitCode).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual([0, 1, 2, 3, 4]);
     });
+
+    it("should cap range output to prevent memory exhaustion", async () => {
+      const env = new Bash();
+      // range(2000000) exceeds the 1M default cap
+      const result = await env.exec(`jq -n '[range(2000000)] | length'`);
+
+      expect(result.exitCode).toBe(0);
+      // Should be capped at maxIterations * 100 (default 10000 * 100 = 1M)
+      expect(Number(result.stdout.trim())).toBeLessThanOrEqual(1_000_000);
+    });
+
+    it("should cap range with start;end form", async () => {
+      const env = new Bash();
+      const result = await env.exec(`jq -n '[range(0; 2000000)] | length'`);
+
+      expect(result.exitCode).toBe(0);
+      expect(Number(result.stdout.trim())).toBeLessThanOrEqual(1_000_000);
+    });
+
+    it("should cap range with start;end;step form", async () => {
+      const env = new Bash();
+      const result = await env.exec(`jq -n '[range(0; 2000000; 1)] | length'`);
+
+      expect(result.exitCode).toBe(0);
+      expect(Number(result.stdout.trim())).toBeLessThanOrEqual(1_000_000);
+    });
+
+    it("should allow moderate ranges", async () => {
+      const env = new Bash();
+      // 50K elements should be fine (well under 1M)
+      const result = await env.exec(`jq -n '[range(50000)] | length'`);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe("50000");
+    });
   });
 });

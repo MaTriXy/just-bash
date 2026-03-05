@@ -115,7 +115,7 @@ export function createDefaultOptions(): RgOptions {
     noIgnoreDot: false,
     noIgnoreVcs: false,
     ignoreFiles: [],
-    maxDepth: Infinity,
+    maxDepth: 256,
     maxFilesize: 0,
     followSymlinks: false,
     searchZip: false,

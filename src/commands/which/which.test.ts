@@ -83,4 +83,12 @@ describe("which", () => {
     expect(result.stdout).toBe("");
     expect(result.exitCode).toBe(0);
   });
+
+  it("should resolve paths safely with ../", async () => {
+    const env = new Bash();
+    // A name containing ../ should not escape PATH directories
+    const result = await env.exec("which ../etc/passwd");
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+  });
 });

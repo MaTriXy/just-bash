@@ -16,9 +16,7 @@ async function tacExecute(
   // TODO: Add file support
   if (args.length > 0 && args[0] !== "-") {
     // Try to read from file
-    const filePath = args[0].startsWith("/")
-      ? args[0]
-      : `${ctx.cwd}/${args[0]}`;
+    const filePath = ctx.fs.resolvePath(ctx.cwd, args[0]);
     try {
       const content = await ctx.fs.readFile(filePath);
       const lines = content.split("\n");

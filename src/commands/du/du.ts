@@ -92,6 +92,9 @@ interface SizeResult {
   stderr: string;
 }
 
+/** Safety limit to prevent stack overflow on deeply nested directories */
+const MAX_DU_DEPTH = 1000;
+
 async function calculateSize(
   ctx: CommandContext,
   fullPath: string,
@@ -104,6 +107,8 @@ async function calculateSize(
     totalSize: 0,
     stderr: "",
   };
+
+  if (depth > MAX_DU_DEPTH) return result;
 
   try {
     const stat = await ctx.fs.stat(fullPath);

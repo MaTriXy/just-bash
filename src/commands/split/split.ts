@@ -33,6 +33,9 @@ const splitHelp = {
   ],
 };
 
+/** Maximum number of output files to prevent resource exhaustion */
+const MAX_OUTPUT_FILES = 100_000;
+
 type SplitMode = "lines" | "bytes" | "chunks";
 
 interface SplitOptions {
@@ -374,6 +377,15 @@ export const split: Command = {
         const _exhaustive: never = options.mode;
         return _exhaustive;
       }
+    }
+
+    // Guard against excessive file creation
+    if (chunks.length > MAX_OUTPUT_FILES) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: `split: too many output files (${chunks.length}), limit is ${MAX_OUTPUT_FILES}\n`,
+      };
     }
 
     // Write output files

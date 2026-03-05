@@ -430,12 +430,17 @@ export const grepCommand: Command = {
   },
 };
 
+/** Safety limit to prevent stack overflow on deeply nested directories */
+const MAX_GREP_DEPTH = 256;
+
 async function expandRecursiveGlob(
   baseDir: string,
   afterGlob: string,
   ctx: CommandContext,
   result: string[],
+  depth = 0,
 ): Promise<void> {
+  if (depth >= MAX_GREP_DEPTH) return;
   const fullBasePath = ctx.fs.resolvePath(ctx.cwd, baseDir);
 
   try {
@@ -462,7 +467,7 @@ async function expandRecursiveGlob(
 
       if (entryStat.isDirectory) {
         // Recurse into directory
-        await expandRecursiveGlob(entryPath, afterGlob, ctx, result);
+        await expandRecursiveGlob(entryPath, afterGlob, ctx, result, depth + 1);
       } else if (afterGlob) {
         // Check if file matches afterGlob pattern
         const pattern = afterGlob.replace(/^\//, "");
@@ -554,7 +559,9 @@ async function expandRecursiveWithTypes(
   excludePatterns: string[] = [],
   excludeDirPatterns: string[] = [],
   knownIsFile?: boolean,
+  depth = 0,
 ): Promise<FileEntry[]> {
+  if (depth >= MAX_GREP_DEPTH) return [];
   const fullPath = ctx.fs.resolvePath(ctx.cwd, path);
   const result: FileEntry[] = [];
 
@@ -629,6 +636,7 @@ async function expandRecursiveWithTypes(
           excludePatterns,
           excludeDirPatterns,
           entry.isFile,
+          depth + 1,
         );
         result.push(...expanded);
       }
@@ -644,6 +652,8 @@ async function expandRecursiveWithTypes(
           includePatterns,
           excludePatterns,
           excludeDirPatterns,
+          undefined,
+          depth + 1,
         );
         result.push(...expanded);
       }

@@ -96,6 +96,36 @@ describe("SED Execution Limits", () => {
 
       expect(result.exitCode).toBe(0);
     });
+
+    it("should enforce hold space size limit with H command", async () => {
+      const env = new Bash({
+        executionLimits: { maxStringLength: 1000 },
+      });
+      // Use -n to suppress output so the output limit doesn't trigger first.
+      // 200 lines of 10 chars = 2000+ bytes in hold space, exceeds 1000 limit.
+      const lines = Array(200).fill("0123456789").join("\n");
+      await env.writeFile("/input.txt", lines);
+
+      const result = await env.exec(`sed -n 'H' /input.txt`);
+
+      expect(result.stderr).toContain("hold space size limit exceeded");
+      expect(result.exitCode).toBe(ExecutionLimitError.EXIT_CODE);
+    });
+
+    it("should enforce pattern space size limit with G command", async () => {
+      const env = new Bash({
+        executionLimits: { maxStringLength: 500 },
+      });
+      // Use -n to suppress output. H accumulates into hold space,
+      // then G appends hold space to pattern space (exceeds limit).
+      const lines = Array(100).fill("0123456789").join("\n");
+      await env.writeFile("/input.txt", lines);
+
+      const result = await env.exec("sed -n 'H; ${G; p}' /input.txt");
+
+      expect(result.exitCode).toBe(ExecutionLimitError.EXIT_CODE);
+      expect(result.stderr).toContain("size limit exceeded");
+    });
   });
 
   describe("regex limits", () => {

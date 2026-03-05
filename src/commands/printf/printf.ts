@@ -178,7 +178,9 @@ export const printfCommand: Command = {
         }
         targetVar = args[argIndex + 1];
         // Validate variable name
-        if (!/^[a-zA-Z_][a-zA-Z0-9_]*(\[[^\]]+\])?$/.test(targetVar)) {
+        if (
+          !/^[a-zA-Z_][a-zA-Z0-9_]*(\[[a-zA-Z0-9_@*"'$]+\])?$/.test(targetVar)
+        ) {
           return {
             stdout: "",
             stderr: `printf: \`${targetVar}': not a valid identifier\n`,

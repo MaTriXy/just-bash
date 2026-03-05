@@ -98,6 +98,12 @@ function expandRange(set: string): string {
     if (i + 2 < set.length && set[i + 1] === "-") {
       const start = set.charCodeAt(i);
       const end = set.charCodeAt(i + 2);
+      if (end - start > 65536) {
+        // Prevent memory exhaustion from huge character ranges
+        throw new Error(
+          `tr: character range too large: '${set[i]}-${set[i + 2]}'`,
+        );
+      }
       for (let code = start; code <= end; code++) {
         result += String.fromCharCode(code);
       }
@@ -152,8 +158,18 @@ export const trCommand: Command = {
       };
     }
 
-    const set1Raw = expandRange(sets[0]);
-    const set2 = sets.length > 1 ? expandRange(sets[1]) : "";
+    let set1Raw: string;
+    let set2: string;
+    try {
+      set1Raw = expandRange(sets[0]);
+      set2 = sets.length > 1 ? expandRange(sets[1]) : "";
+    } catch (e) {
+      return {
+        stdout: "",
+        stderr: `${(e as Error).message}\n`,
+        exitCode: 1,
+      };
+    }
     const content = ctx.stdin;
 
     // Helper to check if character is in set1 (considering complement mode)

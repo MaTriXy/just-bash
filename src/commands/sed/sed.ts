@@ -119,7 +119,10 @@ async function processContent(
 
   // Convert to SedExecutionLimits format
   const sedLimits: SedExecutionLimits | undefined = limits
-    ? { maxIterations: limits.maxSedIterations }
+    ? {
+        maxIterations: limits.maxSedIterations,
+        maxStringLength: maxOutputSize,
+      }
     : undefined;
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
