@@ -126,6 +126,25 @@ const executionContext: AsyncLocalStorageType<DefenseContext> | null =
 const MAX_STORED_VIOLATIONS = 1000;
 
 /**
+ * Module-level helper invoked via `.bind(null, captured, fn)` to avoid
+ * per-call closure allocation in `bindCurrentContext`.
+ *
+ * Uses the native `AsyncLocalStorage.run(store, callback, ...args)` overload
+ * which forwards args without closure allocation.
+ */
+function runInContext(
+  captured: DefenseContext,
+  fn: (...args: unknown[]) => unknown,
+  ...args: unknown[]
+): unknown {
+  // executionContext is guaranteed non-null when this function is reachable
+  // (bindCurrentContext returns `fn` early if executionContext is null).
+  // biome-ignore lint/style/noNonNullAssertion: guarded by bindCurrentContext null check
+  const als = executionContext!;
+  return als.run(captured, () => fn(...args));
+}
+
+/**
  * Default configuration for the defense-in-depth box.
  */
 const DEFAULT_CONFIG: DefenseInDepthConfig = {
@@ -164,6 +183,9 @@ export class DefenseInDepthBox {
   private config: DefenseInDepthConfig;
   private refCount = 0;
   private patchFailures: string[] = [];
+  private activeExecutionIds = new Set<string>();
+  /** Reusable DefenseContext objects keyed by executionId (avoids per-.then() allocation). */
+  private contextCache = new Map<string, DefenseContext>();
   private originalDescriptors: Array<{
     target: object;
     prop: string;
@@ -237,6 +259,73 @@ export class DefenseInDepthBox {
   }
 
   /**
+   * Check if a defense execution ID is still live (its handle is not deactivated).
+   */
+  private isExecutionIdActive(executionId: string): boolean {
+    return this.activeExecutionIds.has(executionId);
+  }
+
+  /**
+   * Get or create a cached DefenseContext for an executionId.
+   * Avoids allocating a new {sandboxActive, executionId} object on every
+   * Promise.then / timer call.
+   */
+  private getCachedContext(executionId: string): DefenseContext {
+    let ctx = this.contextCache.get(executionId);
+    if (!ctx) {
+      ctx = { sandboxActive: true, executionId };
+      this.contextCache.set(executionId, ctx);
+    }
+    return ctx;
+  }
+
+  /**
+   * Return an active execution ID to bind callback context.
+   * When multiple executions are active, this intentionally selects one
+   * active ID so callback execution stays fail-closed.
+   */
+  private getPreferredActiveExecutionId(): string | undefined {
+    if (this.activeExecutionIds.size === 0) return undefined;
+    for (const executionId of this.activeExecutionIds) {
+      return executionId;
+    }
+    return undefined;
+  }
+
+  /**
+   * Bind a callback to the current defense AsyncLocalStorage context.
+   *
+   * Useful for infrastructure callbacks that may execute later via pre-captured
+   * timer references, while still needing executionId/trace continuity.
+   *
+   * Note: this intentionally does NOT preserve `trusted` mode. Trusted execution
+   * is meant to stay tightly scoped to the immediate infrastructure operation.
+   */
+  static bindCurrentContext<TArgs extends unknown[], TResult>(
+    fn: (...args: TArgs) => TResult,
+  ): (...args: TArgs) => TResult {
+    if (!executionContext) return fn;
+    const current = executionContext.getStore();
+    const executionId =
+      current?.sandboxActive === true
+        ? current.executionId
+        : DefenseInDepthBox.instance?.getPreferredActiveExecutionId();
+    if (!executionId) return fn;
+
+    const captured = DefenseInDepthBox.instance?.getCachedContext(
+      executionId,
+    ) ?? {
+      sandboxActive: true as const,
+      executionId,
+    };
+    return runInContext.bind(
+      null,
+      captured,
+      fn as (...args: unknown[]) => unknown,
+    ) as (...args: TArgs) => TResult;
+  }
+
+  /**
    * Check if defense-in-depth is enabled and functional.
    * Returns false if AsyncLocalStorage is unavailable or config.enabled is false.
    */
@@ -274,9 +363,21 @@ export class DefenseInDepthBox {
     if (IS_BROWSER || !this.config.enabled || !executionContext) {
       // Return a no-op handle
       const executionId = generateUUID();
+      let deactivated = false;
       return {
-        run: <T>(fn: () => Promise<T>): Promise<T> => fn(),
-        deactivate: () => {},
+        run: <T>(fn: () => Promise<T>): Promise<T> => {
+          if (deactivated) {
+            return Promise.reject(
+              new Error(
+                "DefenseInDepthBox handle is deactivated and cannot run new work",
+              ),
+            );
+          }
+          return fn();
+        },
+        deactivate: () => {
+          deactivated = true;
+        },
         executionId,
       };
     }
@@ -288,14 +389,28 @@ export class DefenseInDepthBox {
     }
 
     const executionId = generateUUID();
+    let deactivated = false;
 
     return {
       run: <T>(fn: () => Promise<T>): Promise<T> => {
+        if (deactivated) {
+          return Promise.reject(
+            new Error(
+              "DefenseInDepthBox handle is deactivated and cannot run new work",
+            ),
+          );
+        }
+        this.activeExecutionIds.add(executionId);
         // executionContext is guaranteed to be non-null here (checked IS_BROWSER above)
         // biome-ignore lint/style/noNonNullAssertion: guarded by IS_BROWSER check
         return executionContext!.run({ sandboxActive: true, executionId }, fn);
       },
       deactivate: () => {
+        if (deactivated) return;
+        deactivated = true;
+        this.activeExecutionIds.delete(executionId);
+        this.contextCache.delete(executionId);
+
         this.refCount--;
         if (this.refCount === 0) {
           this.restorePatches();
@@ -319,6 +434,8 @@ export class DefenseInDepthBox {
       this.restorePatches();
       this.totalActiveTimeMs += Date.now() - this.activationTime;
     }
+    this.activeExecutionIds.clear();
+    this.contextCache.clear();
     this.refCount = 0;
   }
 
@@ -653,6 +770,10 @@ export class DefenseInDepthBox {
     // Protect Error.prepareStackTrace (only block setting, not reading)
     this.protectErrorPrepareStackTrace();
 
+    // Wrap Promise.then callbacks created in sandbox context so deferred
+    // callbacks cannot outlive handle deactivation.
+    this.protectPromiseThen();
+
     // Block dynamic import() of data:/blob: URLs via ESM loader hooks.
     // Must run BEFORE protectModuleLoad() because it uses require('node:module')
     // which goes through Module._load internally.
@@ -837,6 +958,127 @@ export class DefenseInDepthBox {
       this.patchFailures.push("Error.prepareStackTrace");
       console.debug(
         "[DefenseInDepthBox] Could not protect Error.prepareStackTrace:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
+  /**
+   * Protect Promise.then callback lifetime across deactivate boundaries.
+   *
+   * Callbacks registered in sandbox context are wrapped with an execution-id
+   * liveness check. If they run after the originating handle is deactivated,
+   * they are blocked even if global patches have already been restored.
+   */
+  private protectPromiseThen(): void {
+    const box = this;
+
+    try {
+      const originalDescriptor = Object.getOwnPropertyDescriptor(
+        Promise.prototype,
+        "then",
+      );
+      this.originalDescriptors.push({
+        target: Promise.prototype,
+        prop: "then",
+        descriptor: originalDescriptor,
+      });
+
+      const originalThen = originalDescriptor?.value;
+      if (typeof originalThen !== "function") return;
+
+      /**
+       * Shared callback runner used via `.bind()` to avoid per-.then()
+       * closure allocation.  Arguments are bound at wrap time; the variadic
+       * `args` are forwarded by the Promise machinery.
+       */
+      function runGuardedCallback(
+        this: {
+          box: DefenseInDepthBox;
+          executionId: string;
+          captured: DefenseContext;
+          cb: (...a: unknown[]) => unknown;
+          kind: "fulfilled" | "rejected";
+        },
+        ...args: unknown[]
+      ): unknown {
+        // biome-ignore lint/style/noNonNullAssertion: guarded by patchedThen null check
+        return executionContext!.run(this.captured, () => {
+          if (!this.box.isExecutionIdActive(this.executionId)) {
+            const path = "Promise.then";
+            const message =
+              "Promise.then callback is blocked after defense deactivation";
+            this.box.recordViolation(
+              "promise_then_after_deactivate",
+              path,
+              message,
+            );
+            if (this.box.config.auditMode) {
+              return Reflect.apply(this.cb, undefined, args);
+            }
+            // Preserve native Promise.then pass-through semantics when
+            // callbacks are effectively absent:
+            // - onFulfilled omitted: value flows through unchanged
+            // - onRejected omitted: rejection propagates unchanged
+            if (this.kind === "fulfilled") {
+              return args[0];
+            }
+            throw args[0];
+          }
+
+          return Reflect.apply(this.cb, undefined, args);
+        });
+      }
+
+      // biome-ignore lint/suspicious/noThenProperty: intentional Promise.then hardening hook
+      Object.defineProperty(Promise.prototype, "then", {
+        value: function patchedThen(
+          this: Promise<unknown>,
+          onFulfilled?: unknown,
+          onRejected?: unknown,
+        ) {
+          if (!executionContext) {
+            return Reflect.apply(originalThen, this, [onFulfilled, onRejected]);
+          }
+
+          const store = executionContext.getStore();
+          const executionId =
+            store?.sandboxActive === true && store.trusted !== true
+              ? store.executionId
+              : undefined;
+
+          if (!executionId) {
+            return Reflect.apply(originalThen, this, [onFulfilled, onRejected]);
+          }
+
+          const captured = box.getCachedContext(executionId);
+
+          const wrapCallback = (
+            cb: unknown,
+            kind: "fulfilled" | "rejected",
+          ): unknown => {
+            if (typeof cb !== "function") return cb;
+            return runGuardedCallback.bind({
+              box,
+              executionId,
+              captured,
+              cb: cb as (...a: unknown[]) => unknown,
+              kind,
+            });
+          };
+
+          return Reflect.apply(originalThen, this, [
+            wrapCallback(onFulfilled, "fulfilled"),
+            wrapCallback(onRejected, "rejected"),
+          ]);
+        },
+        writable: true,
+        configurable: true,
+      });
+    } catch (e) {
+      this.patchFailures.push("Promise.prototype.then");
+      console.debug(
+        "[DefenseInDepthBox] Could not protect Promise.prototype.then:",
         e instanceof Error ? e.message : e,
       );
     }
