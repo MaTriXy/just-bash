@@ -31,8 +31,11 @@ export interface ExecutionLimits {
   /** Maximum sqlite3 query execution time in milliseconds (default: 5000) */
   maxSqliteTimeoutMs?: number;
 
-  /** Maximum Python execution time in milliseconds (default: 30000) */
+  /** Maximum Python execution time in milliseconds (default: 10000, or 60000 with network) */
   maxPythonTimeoutMs?: number;
+
+  /** Maximum JavaScript (js-exec) execution time in milliseconds (default: 10000, or 60000 with network) */
+  maxJsTimeoutMs?: number;
 
   /** Maximum glob filesystem operations (default: 100000) */
   maxGlobOperations?: number;
@@ -75,7 +78,8 @@ const DEFAULT_LIMITS: Required<ExecutionLimits> = {
   maxSedIterations: 10000,
   maxJqIterations: 10000,
   maxSqliteTimeoutMs: 5000,
-  maxPythonTimeoutMs: 30000,
+  maxPythonTimeoutMs: 10000,
+  maxJsTimeoutMs: 10000,
   maxGlobOperations: 100000,
   maxStringLength: 10485760, // 10MB
   maxArrayElements: 100000,
@@ -112,6 +116,7 @@ export function resolveLimits(
       userLimits.maxSqliteTimeoutMs ?? DEFAULT_LIMITS.maxSqliteTimeoutMs,
     maxPythonTimeoutMs:
       userLimits.maxPythonTimeoutMs ?? DEFAULT_LIMITS.maxPythonTimeoutMs,
+    maxJsTimeoutMs: userLimits.maxJsTimeoutMs ?? DEFAULT_LIMITS.maxJsTimeoutMs,
     maxGlobOperations:
       userLimits.maxGlobOperations ?? DEFAULT_LIMITS.maxGlobOperations,
     maxStringLength:

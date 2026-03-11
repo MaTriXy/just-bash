@@ -401,6 +401,8 @@ export interface InterpreterState
    * Checked at statement boundaries; when aborted, execution stops.
    */
   signal?: AbortSignal;
+  /** Extra arguments injected via exec({ args }), appended to first command's args */
+  extraArgs?: string[];
 }
 
 export interface InterpreterContext {
@@ -416,6 +418,7 @@ export interface InterpreterContext {
       cwd?: string;
       replaceEnv?: boolean;
       signal?: AbortSignal;
+      args?: string[];
     },
   ) => Promise<ExecResult>;
   executeScript: (node: ScriptNode) => Promise<ExecResult>;
@@ -436,4 +439,9 @@ export interface InterpreterContext {
    * sandbox async context. Used to fail closed on context-loss bugs.
    */
   requireDefenseContext?: boolean;
+  /**
+   * Bootstrap JavaScript code for js-exec.
+   * Threaded through the context chain instead of shell env.
+   */
+  jsBootstrapCode?: string;
 }

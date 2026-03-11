@@ -22,12 +22,14 @@ import { DefenseInDepthBox } from "../../security/defense-in-depth-box.js";
 import { _clearTimeout, _setTimeout } from "../../timers.js";
 import type { Command, CommandContext, ExecResult } from "../../types.js";
 import { hasHelpFlag, showHelp } from "../help.js";
-import { FsBridgeHandler } from "./fs-bridge-handler.js";
-import { createSharedBuffer } from "./protocol.js";
+import { BridgeHandler } from "../worker-bridge/bridge-handler.js";
+import { createSharedBuffer } from "../worker-bridge/protocol.js";
 import type { WorkerInput, WorkerOutput } from "./worker.js";
 
 /** Default Python execution timeout in milliseconds */
-const DEFAULT_PYTHON_TIMEOUT_MS = 30000;
+const DEFAULT_PYTHON_TIMEOUT_MS = 10000;
+/** Default Python execution timeout when network is enabled */
+const DEFAULT_PYTHON_NETWORK_TIMEOUT_MS = 60000;
 
 const python3Help = {
   name: "python3",
@@ -382,15 +384,22 @@ async function executePython(
   scriptArgs: string[] = [],
 ): Promise<ExecResult> {
   const sharedBuffer = createSharedBuffer();
-  const bridgeHandler = new FsBridgeHandler(
+  const bridgeHandler = new BridgeHandler(
     sharedBuffer,
     ctx.fs,
     ctx.cwd,
+    "python3",
     ctx.fetch,
     ctx.limits?.maxOutputSize ?? 0,
   );
 
-  const timeoutMs = ctx.limits?.maxPythonTimeoutMs ?? DEFAULT_PYTHON_TIMEOUT_MS;
+  // Network operations need a longer timeout. resolveLimits() always populates
+  // maxPythonTimeoutMs (default 10s), so use the network default as a floor.
+  const userTimeout =
+    ctx.limits?.maxPythonTimeoutMs ?? DEFAULT_PYTHON_TIMEOUT_MS;
+  const timeoutMs = ctx.fetch
+    ? Math.max(userTimeout, DEFAULT_PYTHON_NETWORK_TIMEOUT_MS)
+    : userTimeout;
   const queueState = getQueueState(ctx.fs);
 
   const workerInput: WorkerInput = {
@@ -403,6 +412,7 @@ async function executePython(
     env: mapToRecord(ctx.env),
     args: scriptArgs,
     scriptPath,
+    timeoutMs,
   };
 
   const workerRef: { current: Worker | null } = { current: null };

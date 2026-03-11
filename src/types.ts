@@ -57,6 +57,12 @@ export interface CommandExecOptions {
    * Used by `timeout` to ensure timed-out commands don't continue running.
    */
   signal?: AbortSignal;
+  /**
+   * Additional argv entries appended to the first executed command.
+   * Values bypass shell parsing entirely — no escaping, splitting, or globbing.
+   * Like child_process.spawnSync(cmd, args).
+   */
+  args?: string[];
 }
 
 /**
@@ -177,6 +183,12 @@ export interface CommandContext {
    * before and after awaited operations.
    */
   requireDefenseContext?: boolean;
+  /**
+   * Bootstrap JavaScript code for js-exec.
+   * Threaded through the context chain instead of shell env to prevent
+   * user access/injection via environment variables.
+   */
+  jsBootstrapCode?: string;
 }
 
 export interface Command {

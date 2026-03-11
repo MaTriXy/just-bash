@@ -1,8 +1,8 @@
 /**
- * SharedArrayBuffer protocol for synchronous filesystem bridge
+ * SharedArrayBuffer protocol for synchronous worker bridge
  *
- * This protocol enables synchronous filesystem access from a worker thread
- * (where CPython/Python runs) to the main thread (which has async IFileSystem).
+ * This protocol enables synchronous filesystem and I/O access from a worker thread
+ * (where CPython/Python or QuickJS runs) to the main thread (which has async IFileSystem).
  */
 
 // Type declaration for Atomics.waitAsync (available in Node.js but not in TS lib)
@@ -35,12 +35,16 @@ export const OpCode = {
   LSTAT: 11,
   CHMOD: 12,
   REALPATH: 13,
-  // Special operations for Python I/O
+  RENAME: 14,
+  COPY_FILE: 15,
+  // Special operations for I/O
   WRITE_STDOUT: 100,
   WRITE_STDERR: 101,
   EXIT: 102,
   // HTTP operations
   HTTP_REQUEST: 200,
+  // Sub-shell execution
+  EXEC_COMMAND: 300,
 } as const;
 
 export type OpCodeType = (typeof OpCode)[keyof typeof OpCode];
@@ -90,7 +94,10 @@ const Offset = {
 const Size = {
   CONTROL_REGION: 32,
   PATH_BUFFER: 4096,
-  DATA_BUFFER: 1048576, // 1MB (reduced from 16MB for faster tests)
+  // 1MB limit applies to all FS read/write operations through the bridge.
+  // Files larger than this will be truncated. This is tight — consider
+  // increasing if real workloads hit the cap. Reduced from 16MB for faster tests.
+  DATA_BUFFER: 1048576,
   TOTAL: 1052704, // 32 + 4096 + 1MB
 } as const;
 

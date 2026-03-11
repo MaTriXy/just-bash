@@ -117,6 +117,7 @@ export interface InterpreterOptions {
       cwd?: string;
       replaceEnv?: boolean;
       signal?: AbortSignal;
+      args?: string[];
     },
   ) => Promise<ExecResult>;
   /** Optional secure fetch function for network-enabled commands */
@@ -131,6 +132,8 @@ export interface InterpreterOptions {
    * When true, fail closed if execution occurs outside defense async context.
    */
   requireDefenseContext?: boolean;
+  /** Bootstrap JavaScript code for js-exec */
+  jsBootstrapCode?: string;
 }
 
 export class Interpreter {
@@ -151,6 +154,7 @@ export class Interpreter {
       trace: options.trace,
       coverage: options.coverage,
       requireDefenseContext: options.requireDefenseContext ?? false,
+      jsBootstrapCode: options.jsBootstrapCode,
     };
   }
 
@@ -1005,6 +1009,15 @@ export class Interpreter {
         }
       }
       return OK;
+    }
+
+    // Append extra args injected via exec({ args }) and consume them
+    if (this.ctx.state.extraArgs) {
+      args.push(...this.ctx.state.extraArgs);
+      for (let i = 0; i < this.ctx.state.extraArgs.length; i++) {
+        quotedArgs.push(true);
+      }
+      this.ctx.state.extraArgs = undefined;
     }
 
     // Generate xtrace output before running the command

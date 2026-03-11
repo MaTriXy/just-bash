@@ -262,7 +262,6 @@ export class WorkerDefenseInDepth {
    * Create a blocking proxy for a function.
    * In worker context, always blocks (no context check needed).
    */
-  // @banned-pattern-ignore: intentional use of Function type for security proxy
   private createBlockingProxy<T extends (...args: unknown[]) => unknown>(
     original: T,
     path: string,
@@ -304,6 +303,7 @@ export class WorkerDefenseInDepth {
     original: T,
     path: string,
     violationType: SecurityViolationType,
+    allowedKeys?: Set<string>,
   ): T {
     const self = this;
     const auditMode = this.config.auditMode;
@@ -315,6 +315,10 @@ export class WorkerDefenseInDepth {
         // Recursion guard: if we're already in a trap (e.g., recordViolation
         // triggers process.env access), just return the value to avoid infinite loop
         if (self.inTrap) {
+          return Reflect.get(target, prop, receiver);
+        }
+        // Allow specific keys through (e.g., Node.js internal env vars like FORCE_COLOR)
+        if (allowedKeys && typeof prop === "string" && allowedKeys.has(prop)) {
           return Reflect.get(target, prop, receiver);
         }
         self.inTrap = true;
@@ -1314,6 +1318,7 @@ export class WorkerDefenseInDepth {
                 original as object,
                 path,
                 violationType,
+                blocked.allowedKeys,
               );
 
         Object.defineProperty(target, prop, {

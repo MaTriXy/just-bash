@@ -13,6 +13,7 @@ import type { FunctionDefNode } from "./ast/types.js";
 import "./timers.js";
 import {
   type CommandName,
+  createJavaScriptCommands,
   createLazyCommands,
   createNetworkCommands,
   createPythonCommands,
@@ -86,6 +87,11 @@ export interface BashLogger {
   debug(message: string, data?: Record<string, unknown>): void;
 }
 
+export interface JavaScriptConfig {
+  /** Bootstrap JavaScript code to run before user scripts */
+  bootstrap?: string;
+}
+
 export interface BashOptions {
   files?: InitialFiles;
   env?: Record<string, string>;
@@ -126,6 +132,11 @@ export interface BashOptions {
    * (arbitrary code execution via CPython Emscripten).
    */
   python?: boolean;
+  /**
+   * Enable js-exec command for sandboxed JavaScript execution via QuickJS.
+   * Disabled by default. Can be a boolean or a config object with bootstrap code.
+   */
+  javascript?: boolean | JavaScriptConfig;
   /**
    * Optional list of command names to register.
    * If not provided, all built-in commands are available.
@@ -245,6 +256,13 @@ export interface ExecOptions {
    * When aborted, the interpreter stops executing at the next statement boundary.
    */
   signal?: AbortSignal;
+  /**
+   * Additional argv entries appended to the first executed command at the interpreter level.
+   * Values bypass shell parsing entirely — no escaping, splitting, or globbing.
+   * Like child_process.spawnSync(cmd, args). These do not set or modify the shell's
+   * positional parameters ($1, $2, "$@", etc.).
+   */
+  args?: string[];
 }
 
 export class Bash {
@@ -258,6 +276,7 @@ export class Bash {
   private logger?: BashLogger;
   private defenseInDepthConfig?: DefenseInDepthConfig | boolean;
   private coverageWriter?: FeatureCoverageWriter;
+  private jsBootstrapCode?: string;
   // biome-ignore lint/suspicious/noExplicitAny: type-erased plugin storage for untyped API
   private transformPlugins: TransformPlugin<any>[] = [];
 
@@ -430,6 +449,21 @@ export class Bash {
       }
     }
 
+    // Register javascript commands only when explicitly enabled
+    if (options.javascript) {
+      for (const cmd of createJavaScriptCommands()) {
+        this.registerCommand(cmd);
+      }
+      // Store bootstrap code in private field (threaded via context chain, not env)
+      const jsConfig =
+        typeof options.javascript === "object"
+          ? options.javascript
+          : Object.create(null);
+      if (jsConfig.bootstrap) {
+        this.jsBootstrapCode = jsConfig.bootstrap;
+      }
+    }
+
     // Register custom commands (after built-ins so they can override)
     if (options.customCommands) {
       for (const cmd of options.customCommands) {
@@ -579,6 +613,8 @@ export class Bash {
       groupStdin: options?.stdin,
       // Cooperative cancellation signal (used by timeout command)
       signal: options?.signal,
+      // Extra arguments injected directly into first command's arg list
+      extraArgs: options?.args,
     };
 
     // Normalize indented multi-line scripts (unless rawScript is true)
@@ -629,6 +665,7 @@ export class Bash {
           trace: this.traceFn,
           coverage: this.coverageWriter,
           requireDefenseContext: defenseBox?.isEnabled() === true,
+          jsBootstrapCode: this.jsBootstrapCode,
         };
 
         const interpreter = new Interpreter(interpreterOptions, execState);
